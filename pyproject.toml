@@ -1,0 +1,14 @@
+[project]
+name = "lerobot-dataset-wrapper"
+version = "0.1.0"
+description = "Wrapper for LeRobot datasets providing high-level operations"
+requires-python = ">=3.8"
+dependencies = [
+    "lerobot",
+]
+
+[project.optional-dependencies]
+dev = [
+    "tqdm",
+]
+
