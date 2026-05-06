@@ -21,6 +21,7 @@ const managedEnv = {
   URDF_OPS_API_PORT: apiPort,
   URDF_OPS_BACKEND_URL: apiBaseUrl,
   URDF_OPS_API_BASE_URL: apiBaseUrl,
+  URDF_STUDIO_TRAINING_LEROBOT_PYTHON: python,
 };
 
 const children = [];
