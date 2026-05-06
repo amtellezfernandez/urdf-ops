@@ -2,19 +2,20 @@
 
 Standalone training operations workspace split from URDF Studio.
 
-## Run
+## Run Just Ops
 
 ```bash
 npm install
-npm run dev
+npm run start
 ```
 
 The frontend defaults to http://127.0.0.1:5174 and proxies `/api` to http://127.0.0.1:8001.
 
-## Backend
+## Run UI And Backend Separately
 
 ```bash
-python3 -m uvicorn backend.app:app --host 127.0.0.1 --port 8001
+npm run backend
+npm run dev
 ```
 
-Training endpoints are exposed under `/training/*`.
+Training endpoints are exposed under `/training/*`. URDF Studio can also launch this repo as a sibling checkout during `npm run start`.
