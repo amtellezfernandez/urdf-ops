@@ -1,0 +1,10 @@
+export const DEFAULT_CHART_HEIGHT_PX = 300;
+export const SVG_VIEWBOX_WIDTH = 720;
+export const SVG_VIEWBOX_HEIGHT = 280;
+export const SVG_PADDING_LEFT = 58;
+export const SVG_PADDING_RIGHT = 18;
+export const SVG_PADDING_TOP = 20;
+export const SVG_PADDING_BOTTOM = 36;
+export const GRID_LINE_COUNT = 4;
+export const MIN_VALUE_RANGE = 1;
+export const EMPTY_STATE_HEIGHT_PX = 300;

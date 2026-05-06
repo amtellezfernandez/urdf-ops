@@ -1,2 +1,8 @@
+fastapi
+uvicorn
+pydantic
+huggingface_hub
+torch
 lerobot
-rerun-sdk
+safetensors
+pytest

@@ -1,1 +1,9 @@
 datasets/
+node_modules/
+dist/
+.vite/
+.venv/
+.venv-lerobot/
+.pytest_cache/
+__pycache__/
+*.pyc
