@@ -5,8 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from fastapi.testclient import TestClient
-
+import backend.api.training as training_api
 from backend.models.training import (
     JobStatus,
     ModelArchitecture,
@@ -39,6 +38,16 @@ TEST_LOCAL_PYTHON_PATH = "/tmp/urdf-studio-test-python"
 TEST_JOB_TIMESTAMP = "2026-04-12T00:00:00"
 TEST_TRAINING_LOSS = 0.125
 TEST_TRAINING_LEARNING_RATE = 0.001
+
+
+def _runpod_cloud_start_request() -> TrainingStartRequest:
+    return TrainingStartRequest.model_validate(
+        {
+            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "model": {"architecture": ModelArchitecture.ACT.value},
+            "compute": {"type": "runpod", "apiKey": "secret"},
+        }
+    )
 
 
 def test_training_start_request_accepts_ui_camel_case_payloads() -> None:
@@ -226,32 +235,30 @@ def test_start_training_rejects_cloud_before_job_side_effects() -> None:
 
 
 def test_training_compute_api_reports_cloud_disabled_and_rejects_start() -> None:
-    client = TestClient(create_app(), client=("127.0.0.1", 50000))
+    backends_payload = asyncio.run(training_api.list_compute_backends()).model_dump()
+    start_payload = asyncio.run(
+        training_api.start_training(_runpod_cloud_start_request())
+    ).model_dump()
 
-    backends_response = client.get("/training/compute/backends")
-    start_response = client.post(
-        "/training/start",
-        json={
-            "dataset": {"repoId": TEST_DATASET_REPO_ID},
-            "model": {"architecture": ModelArchitecture.ACT.value},
-            "compute": {"type": "runpod", "apiKey": "secret"},
-        },
-    )
-
-    assert backends_response.status_code == 200
-    backends_by_type = {
-        backend["type"]: backend for backend in backends_response.json()["backends"]
-    }
+    assert backends_payload["backends"]
+    backends_by_type = {backend["type"]: backend for backend in backends_payload["backends"]}
     assert backends_by_type["runpod"]["enabled"] is False
     assert backends_by_type["macrodata"]["enabled"] is False
     assert backends_by_type["macrodata"]["missingCapabilities"] == list(
         TRAINING_CLOUD_CONTROL_REQUIRED_CAPABILITIES
     )
     assert backends_by_type["aws"]["enabled"] is False
-    assert start_response.status_code == 200
-    assert start_response.json()["success"] is False
-    assert start_response.json()["message"] == TRAINING_CLOUD_COMPUTE_DISABLED_MESSAGE
+    assert start_payload["success"] is False
+    assert start_payload["message"] == TRAINING_CLOUD_COMPUTE_DISABLED_MESSAGE
 
+
+def test_training_compute_api_payloads_serialize_for_ui() -> None:
+    start_payload = asyncio.run(
+        training_api.start_training(_runpod_cloud_start_request())
+    ).model_dump()
+
+    assert "jobId" in start_payload
+    assert "job_id" not in start_payload
 
 
 def test_training_status_uses_launch_compute_config(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -11,7 +11,7 @@
     "typecheck": "tsc -b --pretty false config/tsconfig.json",
     "setup": "node tools/scripts/setup.js",
     "start": "node tools/scripts/start-ops.js",
-    "test:backend": "sh -c 'if [ ! -x .venv-lerobot/bin/python3 ]; then echo \"Missing .venv-lerobot/bin/python3. Run npm run setup first.\" >&2; exit 1; fi; if [ \"$#\" -gt 0 ]; then .venv-lerobot/bin/python3 -m pytest \"$@\"; else .venv-lerobot/bin/python3 -m pytest backend/tests/test_training_models.py backend/tests/test_compute_factory.py backend/tests/test_training_cloud_control.py; fi' --",
+    "test:backend": "sh -c 'if [ ! -x .venv-lerobot/bin/python3 ]; then echo \"Missing .venv-lerobot/bin/python3. Run npm run setup first.\" >&2; exit 1; fi; if [ \"$#\" -gt 0 ]; then .venv-lerobot/bin/python3 -m pytest \"$@\"; else .venv-lerobot/bin/python3 -m pytest backend/tests/test_training_models.py backend/tests/test_compute_factory.py backend/tests/test_training_cloud_control.py backend/tests/test_keypoint_observations.py; fi' --",
     "backend": "python3 -m uvicorn backend.app:app --host 127.0.0.1 --port 8001"
   },
   "bin": {
