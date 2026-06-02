@@ -3,6 +3,10 @@ name = "urdf-ops"
 version = "0.1.0"
 description = "Training operations UI and backend for URDF Studio"
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
+classifiers = [
+  "License :: OSI Approved :: GNU Affero General Public License v3",
+]
 dependencies = [
   "fastapi",
   "uvicorn",

@@ -1,5 +1,9 @@
 # URDF Ops
 
+## License
+
+This project is licensed under AGPL-3.0-only. See `LICENSE` and `NOTICE`.
+
 Standalone training operations workspace split from URDF Studio.
 
 ## Run Just Ops
