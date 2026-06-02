@@ -37,7 +37,7 @@
     "apache-arrow": "^21.1.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "i-love-urdf": "git+https://github.com/urdf-studio/i-love-urdf-unprod.git#10ab4f8d4bf7ae0f75ae5cc8d5a389122c1eabf4",
+    "i-love-urdf": "https://github.com/amtellezfernandez/i-love-urdf/archive/40367dacb18a5b2704661ea323e28e66a20dec8d.tar.gz",
     "inquirer": "^13.2.0",
     "js-yaml": "^4.1.1",
     "jszip": "^3.10.1",
@@ -71,11 +71,11 @@
     "jsdom": "^29.0.0",
     "lovable-tagger": "^1.1.11",
     "playwright": "^1.58.2",
-    "postcss": "^8.5.6",
+    "postcss": "^8.5.10",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
     "vite": "^6.0.3",
-    "vitest": "^4.0.17"
+    "vitest": "^4.1.0"
   }
 }
