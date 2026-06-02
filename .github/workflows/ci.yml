@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20.19.6
+          package-manager-cache: false
+
+      - name: Install Dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  backend-syntax:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Check Python Project Metadata
+        run: python -S -c "import pathlib, tomllib; tomllib.loads(pathlib.Path('pyproject.toml').read_text()); print('pyproject ok')"
+
+      - name: Check License Files
+        run: python -S -c "import pathlib; assert pathlib.Path('LICENSE').read_text().startswith('                    GNU AFFERO GENERAL PUBLIC LICENSE'); assert 'AGPL-3.0-only' in pathlib.Path('NOTICE').read_text(); print('license files ok')"
+
+      - name: Check Backend Syntax
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          for path in sorted(Path("backend").rglob("*.py")):
+              ast.parse(path.read_text(), filename=str(path))
+
+          print("backend syntax ok")
+          PY
