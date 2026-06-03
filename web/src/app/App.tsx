@@ -15,7 +15,12 @@ export default function App() {
         <Toaster />
         <Sonner />
         <AppErrorBoundary>
-          <BrowserRouter>
+          <BrowserRouter
+            future={{
+              v7_relativeSplatPath: true,
+              v7_startTransition: true,
+            }}
+          >
             <Routes>
               <Route path="/" element={<UrdfOps />} />
               <Route path="/urdfops" element={<UrdfOps />} />

@@ -1,5 +1,13 @@
-import type { DatasetInfo, DatasetSource } from "@/features/datasets";
+import type { DatasetSource } from "@/features/training/types";
 import { URDF_OPS_QUERY_PARAMS } from "@/shared/config/urdfOpsRoutes";
+
+export type UrdfOpsInitialDataset = {
+  id: string;
+  name: string;
+  source: DatasetSource;
+  author?: string;
+  tags: string[];
+};
 
 const URDF_OPS_DATASET_SOURCE_VALUES = new Set<DatasetSource>([
   "huggingface",
@@ -17,7 +25,7 @@ const resolveUrdfOpsDatasetSource = (
 
 export const buildUrdfOpsInitialDataset = (
   searchParams: URLSearchParams,
-): DatasetInfo | null => {
+): UrdfOpsInitialDataset | null => {
   const datasetId = searchParams.get(URDF_OPS_QUERY_PARAMS.dataset)?.trim();
   if (!datasetId) return null;
 
