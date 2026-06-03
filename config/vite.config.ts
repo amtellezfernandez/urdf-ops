@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { runtimeUrls } from "./runtime.js";
@@ -9,6 +10,20 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 const webRoot = path.resolve(rootDir, "web");
 const iLoveUrdfSourceRoot = path.resolve(rootDir, "..", "i-love-urdf", "src");
+const iLoveUrdfBrowserEntry = path.resolve(iLoveUrdfSourceRoot, "browser.ts");
+const iLoveUrdfIndexEntry = path.resolve(iLoveUrdfSourceRoot, "index.ts");
+const useLocalILoveUrdfSource = process.env.URDF_OPS_USE_LOCAL_I_LOVE_URDF === "1";
+const hasLocalILoveUrdfSource =
+  useLocalILoveUrdfSource &&
+  fs.existsSync(iLoveUrdfBrowserEntry) &&
+  fs.existsSync(iLoveUrdfIndexEntry);
+const localILoveUrdfAliases: Record<string, string> = hasLocalILoveUrdfSource
+  ? {
+      "i-love-urdf/browser": iLoveUrdfBrowserEntry,
+      "i-love-urdf": iLoveUrdfIndexEntry,
+    }
+  : {};
+const localILoveUrdfFsAllowList = hasLocalILoveUrdfSource ? [iLoveUrdfSourceRoot] : [];
 
 const resolveClientApiBaseUrl = (mode: string): string =>
   process.env.URDF_OPS_API_BASE_URL ||
@@ -27,7 +42,7 @@ export default defineConfig(({ mode }) => ({
         webRoot,
         path.resolve(rootDir, "private_runtime", "src"),
         path.resolve(rootDir, "node_modules"),
-        iLoveUrdfSourceRoot,
+        ...localILoveUrdfFsAllowList,
       ],
     },
     proxy: {
@@ -56,8 +71,7 @@ export default defineConfig(({ mode }) => ({
     alias: {
       "@": path.resolve(webRoot, "src"),
       "@runtime-private": path.resolve(rootDir, "private_runtime", "src"),
-      "i-love-urdf/browser": path.resolve(iLoveUrdfSourceRoot, "browser.ts"),
-      "i-love-urdf": path.resolve(iLoveUrdfSourceRoot, "index.ts"),
+      ...localILoveUrdfAliases,
     },
   },
   build: { chunkSizeWarningLimit: 900 },

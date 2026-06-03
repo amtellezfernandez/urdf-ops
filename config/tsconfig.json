@@ -5,9 +5,7 @@
     "baseUrl": "..",
     "paths": {
       "@/*": ["web/src/*"],
-      "@runtime-private/*": ["private_runtime/src/*"],
-      "i-love-urdf": ["../i-love-urdf/src/index.ts"],
-      "i-love-urdf/browser": ["../i-love-urdf/src/browser.ts"]
+      "@runtime-private/*": ["private_runtime/src/*"]
     },
     "noImplicitAny": false,
     "noUnusedParameters": false,
