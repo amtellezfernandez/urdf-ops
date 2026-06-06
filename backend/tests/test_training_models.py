@@ -38,6 +38,53 @@ TEST_LOCAL_PYTHON_PATH = "/tmp/urdf-studio-test-python"
 TEST_JOB_TIMESTAMP = "2026-04-12T00:00:00"
 TEST_TRAINING_LOSS = 0.125
 TEST_TRAINING_LEARNING_RATE = 0.001
+TEST_SO101_URDF = """<?xml version="1.0"?>
+<robot name="so101_new_calib">
+  <link name="base"/>
+  <link name="shoulder"/>
+  <link name="upper_arm"/>
+  <link name="forearm"/>
+  <link name="wrist"/>
+  <link name="gripper"/>
+  <link name="jaw"/>
+  <joint name="gripper" type="revolute">
+    <parent link="gripper"/>
+    <child link="jaw"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-0.2" upper="1.7" velocity="1.0" effort="1.0"/>
+  </joint>
+  <joint name="wrist_roll" type="revolute">
+    <parent link="wrist"/>
+    <child link="gripper"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" velocity="1.0" effort="1.0"/>
+  </joint>
+  <joint name="wrist_flex" type="revolute">
+    <parent link="forearm"/>
+    <child link="wrist"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.74" upper="1.74" velocity="1.0" effort="1.0"/>
+  </joint>
+  <joint name="elbow_flex" type="revolute">
+    <parent link="upper_arm"/>
+    <child link="forearm"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.74" upper="1.74" velocity="1.0" effort="1.0"/>
+  </joint>
+  <joint name="shoulder_lift" type="revolute">
+    <parent link="shoulder"/>
+    <child link="upper_arm"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.74" upper="1.74" velocity="1.0" effort="1.0"/>
+  </joint>
+  <joint name="shoulder_pan" type="revolute">
+    <parent link="base"/>
+    <child link="shoulder"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" velocity="1.0" effort="1.0"/>
+  </joint>
+</robot>
+"""
 
 
 def _runpod_cloud_start_request() -> TrainingStartRequest:
@@ -97,8 +144,9 @@ def test_training_model_catalog_uses_lerobot_architecture_names() -> None:
     models = list_models()
     architecture_names = {model.name for model in models.models}
 
-    assert {"act", "diffusion_policy", "tdmpc", "vq_bet"}.issubset(architecture_names)
+    assert {"act", "diffusion_policy", "dreamzero", "tdmpc", "vq_bet"}.issubset(architecture_names)
     assert get_model_info("diffusion_policy") is not None
+    assert get_model_info("dreamzero") is not None
     assert get_model_info("vq_bet") is not None
 
 
@@ -216,6 +264,52 @@ def test_training_launch_contract_reuses_shared_local_dataset_allowlist(
     assert contract.training_config["dataset"]["local_path"] == str(
         dataset_root.resolve(strict=False)
     )
+
+
+def test_training_launch_contract_embeds_urdf_action_schema_for_dreamzero() -> None:
+    request = TrainingStartRequest.model_validate(
+        {
+            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "model": {"architecture": ModelArchitecture.DREAMZERO.value},
+            "urdf": TEST_SO101_URDF,
+            "robotName": "so101",
+        }
+    )
+
+    contract = build_training_launch_contract(
+        request,
+        job_id=TEST_JOB_ID,
+        lerobot_python_path=Path("/tmp/python"),
+    )
+
+    action_schema = contract.training_config["model"]["config"]["action_schema"]
+    assert action_schema["robot_name"] == "so101"
+    assert action_schema["action_dim"] == 6
+    assert action_schema["joint_names"] == [
+        "shoulder_pan",
+        "shoulder_lift",
+        "elbow_flex",
+        "wrist_flex",
+        "wrist_roll",
+        "gripper",
+    ]
+    assert contract.training_config["embodiment"] == action_schema
+
+
+def test_training_launch_contract_requires_dreamzero_action_schema() -> None:
+    request = TrainingStartRequest.model_validate(
+        {
+            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "model": {"architecture": ModelArchitecture.DREAMZERO.value},
+        }
+    )
+
+    with pytest.raises(ValueError, match="DreamZero training requires"):
+        build_training_launch_contract(
+            request,
+            job_id=TEST_JOB_ID,
+            lerobot_python_path=Path("/tmp/python"),
+        )
 
 
 def test_start_training_rejects_cloud_before_job_side_effects() -> None:

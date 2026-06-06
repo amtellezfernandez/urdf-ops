@@ -46,6 +46,7 @@ class ModelArchitecture(str, Enum):
 
     ACT = "act"
     DIFFUSION_POLICY = "diffusion_policy"
+    DREAMZERO = "dreamzero"
     TDMPC = "tdmpc"
     VQ_BET = "vq_bet"
     CUSTOM = "custom"

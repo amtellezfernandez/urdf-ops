@@ -24,7 +24,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import torch
-from lerobot.policies.factory import PreTrainedPolicy
 
 logging.basicConfig(
     level=logging.INFO,
@@ -88,10 +87,14 @@ def create_policy(architecture: str, config: Dict[str, Any], state_dict: Dict[st
 
     pretrained_path = config.get("pretrained_path")
     if pretrained_path:
+        from lerobot.policies import PreTrainedPolicy
+
         return PreTrainedPolicy.from_pretrained(pretrained_path, local_files_only=True)
 
     # Get dataset stats from config if available
     dataset_stats = config.get("dataset_stats", {})
+
+    from lerobot.policies import PreTrainedPolicy
 
     policy = PreTrainedPolicy.from_pretrained(
         architecture,

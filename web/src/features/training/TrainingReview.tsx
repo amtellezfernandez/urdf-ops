@@ -90,6 +90,7 @@ export function TrainingReview() {
     const names: Record<string, string> = {
       act: "ACT (Action Chunking Transformer)",
       diffusion_policy: "Diffusion Policy",
+      dreamzero: "DreamZero",
       tdmpc: "TD-MPC",
       vq_bet: "VQ-BeT",
       custom: "Custom Model",

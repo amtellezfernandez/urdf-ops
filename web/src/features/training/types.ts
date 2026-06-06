@@ -12,6 +12,7 @@ export type DatasetSource = "huggingface" | "local";
 export type ModelArchitecture =
   | "act"
   | "diffusion_policy"
+  | "dreamzero"
   | "tdmpc"
   | "vq_bet"
   | "custom";

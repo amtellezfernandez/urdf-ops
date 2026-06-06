@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import random
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -34,13 +35,6 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
-
-# LeRobot 0.4.x imports
-from lerobot.datasets.factory import make_dataset
-from lerobot.policies.factory import make_policy
-from lerobot.configs.default import DatasetConfig
-from lerobot.configs.policies import PreTrainedConfig
 
 logging.basicConfig(
     level=logging.INFO,
@@ -118,7 +112,7 @@ def write_progress(
     total_epochs: int,
     current_step: int,
     total_steps: int,
-    metrics: Dict[str, float],
+    metrics: Dict[str, Any],
 ) -> None:
     """Write progress to file for status polling."""
     progress = {
@@ -173,6 +167,112 @@ def get_policy_class(architecture: str):
         raise ValueError(f"Unknown architecture: {architecture}")
 
 
+def _as_optional_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _as_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("DreamZero runner_args must be a list of strings when provided.")
+    return [str(item) for item in value]
+
+
+def _write_json(path: Path, payload: Dict[str, Any]) -> None:
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+
+
+def _dreamzero_runner_command(model_runtime_config: Dict[str, Any], config_path: Path) -> list[str]:
+    runner_script = (
+        _as_optional_string(model_runtime_config.get("runner_script"))
+        or _as_optional_string(os.environ.get("URDF_OPS_DREAMZERO_RUNNER_SCRIPT"))
+    )
+    runner_module = (
+        _as_optional_string(model_runtime_config.get("runner_module"))
+        or _as_optional_string(os.environ.get("URDF_OPS_DREAMZERO_RUNNER_MODULE"))
+    )
+    runner_args = _as_string_list(model_runtime_config.get("runner_args"))
+    if runner_script and runner_module:
+        raise ValueError("Set only one DreamZero runner_script or runner_module.")
+    if runner_script:
+        return [sys.executable, runner_script, "--config", str(config_path), *runner_args]
+    if runner_module:
+        return [sys.executable, "-m", runner_module, "--config", str(config_path), *runner_args]
+    raise RuntimeError(
+        "DreamZero training requires model.config.runner_script, model.config.runner_module, "
+        "URDF_OPS_DREAMZERO_RUNNER_SCRIPT, or URDF_OPS_DREAMZERO_RUNNER_MODULE."
+    )
+
+
+def train_with_dreamzero(config: Dict[str, Any], job_dir: Path) -> None:
+    """Launch an external DreamZero-compatible runner with a URDF action schema."""
+
+    model_config = config.get("model", {})
+    runtime_config = model_config.get("config", {})
+    if not isinstance(runtime_config, dict):
+        raise ValueError("DreamZero model config must be an object.")
+
+    action_schema = runtime_config.get("action_schema")
+    if not isinstance(action_schema, dict):
+        raise ValueError("DreamZero model config is missing action_schema.")
+    if not action_schema.get("joint_names") or not action_schema.get("action_dim"):
+        raise ValueError("DreamZero action_schema must include joint_names and action_dim.")
+
+    dreamzero_config_path = job_dir / "dreamzero_config.json"
+    _write_json(dreamzero_config_path, config)
+    write_progress(
+        job_dir=job_dir,
+        current_epoch=0,
+        total_epochs=1,
+        current_step=0,
+        total_steps=1,
+        metrics={
+            "status": "running",
+            "dreamzero_action_dim": float(action_schema["action_dim"]),
+        },
+    )
+
+    cmd = _dreamzero_runner_command(runtime_config, dreamzero_config_path)
+    logger.info("Launching DreamZero runner: %s", " ".join(cmd))
+    result = subprocess.run(
+        cmd,
+        cwd=job_dir,
+        env={
+            **os.environ,
+            "URDF_OPS_DREAMZERO_CONFIG": str(dreamzero_config_path),
+            "URDF_OPS_DREAMZERO_ACTION_SCHEMA": json.dumps(action_schema),
+        },
+        text=True,
+    )
+    if result.returncode != 0:
+        write_progress(
+            job_dir=job_dir,
+            current_epoch=0,
+            total_epochs=1,
+            current_step=0,
+            total_steps=1,
+            metrics={"status": "failed"},
+        )
+        raise RuntimeError(f"DreamZero runner failed with exit code {result.returncode}")
+
+    write_progress(
+        job_dir=job_dir,
+        current_epoch=1,
+        total_epochs=1,
+        current_step=1,
+        total_steps=1,
+        metrics={
+            "status": "completed",
+            "dreamzero_action_dim": float(action_schema["action_dim"]),
+        },
+    )
+
+
 def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
     """Train using LeRobot library.
 
@@ -189,6 +289,11 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
         RuntimeError: If training fails
     """
     logger.info("Starting LeRobot training")
+    from torch.utils.data import DataLoader
+    from lerobot.configs.default import DatasetConfig
+    from lerobot.configs.train import TrainPipelineConfig
+    from lerobot.datasets import make_dataset
+    from lerobot.policies import make_policy
 
     # Extract configs
     dataset_config = config.get("dataset", {})
@@ -264,8 +369,6 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
     )
 
     # Create dataset config for LeRobot
-    from lerobot.configs.train import TrainPipelineConfig
-
     ds_cfg = DatasetConfig(repo_id=repo_id)
 
     # Create training pipeline config with policy
@@ -489,8 +592,11 @@ def main() -> int:
     logger.info(f"Job directory: {job_dir}")
 
     try:
-        # Run training
-        train_with_lerobot(config, job_dir)
+        architecture = str(config.get("model", {}).get("architecture", "act")).replace("-", "_")
+        if architecture == "dreamzero":
+            train_with_dreamzero(config, job_dir)
+        else:
+            train_with_lerobot(config, job_dir)
         return 0
 
     except KeyboardInterrupt:

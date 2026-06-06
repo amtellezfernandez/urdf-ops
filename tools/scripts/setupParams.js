@@ -38,7 +38,13 @@ export const BACKEND_PYTHON_VERIFY_IMPORT_SCRIPT = [
   '    importlib.import_module(module_name)',
   'print("backend python runtime ok")',
 ].join('\n');
-export const LEROBOT_TRAINING_DEPENDENCIES = ['lerobot', 'torch', 'safetensors'];
-export const LEROBOT_TRAINING_VERIFY_IMPORT_SCRIPT = 'import torch; import lerobot; import safetensors; print("lerobot training runtime ok")';
+export const LEROBOT_TRAINING_DEPENDENCIES = ['lerobot[training]', 'torch', 'safetensors'];
+export const LEROBOT_TRAINING_VERIFY_IMPORT_SCRIPT = [
+  'import torch',
+  'import safetensors',
+  'from lerobot.datasets import make_dataset',
+  'from lerobot.policies import make_policy',
+  'print("lerobot training runtime ok")',
+].join('\n');
 export const MJLAB_DEPENDENCIES = ['mjlab', 'mujoco', MJLAB_MUJOCO_WARP_GIT_SPEC];
 export const MJLAB_VERIFY_IMPORT_SCRIPT = 'import mjlab; import mujoco; import mujoco_warp; print("mjlab runtime ok")';

@@ -18,6 +18,10 @@ from backend.services.training_params import (
     TRAINING_DEFAULT_OUTPUT_ROOT_DIRNAME,
     TRAINING_OUTPUT_ROOTS_ENV,
 )
+from backend.services.urdf_action_schema import (
+    URDF_ACTION_UNITS_NATIVE,
+    build_urdf_action_schema,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +111,61 @@ def _build_dataset_config(
     return dataset_config
 
 
+def _model_architecture(request: TrainingStartRequest) -> str:
+    return get_enum_value(request.model.architecture)
+
+
+def _build_embodiment_config(request: TrainingStartRequest) -> dict[str, Any] | None:
+    if not request.urdf:
+        return None
+
+    model_config = dump_internal_model(request.model).get("config", {})
+    action_units = (
+        str(model_config.get("action_units")).strip()
+        if isinstance(model_config, dict) and model_config.get("action_units")
+        else URDF_ACTION_UNITS_NATIVE
+    )
+    return build_urdf_action_schema(
+        request.urdf,
+        robot_name=request.robot_name,
+        action_units=action_units,
+    )
+
+
+def _build_model_config(
+    request: TrainingStartRequest,
+    embodiment_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    model_config = dump_internal_model(request.model)
+    architecture = _model_architecture(request)
+    if architecture != "dreamzero":
+        return model_config
+
+    raw_config = model_config.get("config", {})
+    architecture_config = dict(raw_config) if isinstance(raw_config, dict) else {}
+    explicit_action_schema = architecture_config.get("action_schema")
+    if embodiment_config is None and not isinstance(explicit_action_schema, dict):
+        raise ValueError(
+            "DreamZero training requires a URDF in the request or model.config.action_schema "
+            "so the action dimension and joint order can be derived."
+        )
+
+    action_schema = explicit_action_schema if isinstance(explicit_action_schema, dict) else embodiment_config
+    if not isinstance(action_schema, dict):
+        raise ValueError("DreamZero action schema must be an object.")
+    if not action_schema.get("joint_names") or not action_schema.get("action_dim"):
+        raise ValueError("DreamZero action schema requires joint_names and action_dim.")
+    architecture_config["action_schema"] = action_schema
+    architecture_config["action_dim"] = action_schema["action_dim"]
+    architecture_config["action_joint_names"] = action_schema["joint_names"]
+    architecture_config.setdefault(
+        "action_units",
+        action_schema.get("action_units", URDF_ACTION_UNITS_NATIVE),
+    )
+    model_config["config"] = architecture_config
+    return model_config
+
+
 def build_training_launch_contract(
     request: TrainingStartRequest,
     *,
@@ -134,18 +193,28 @@ def build_training_launch_contract(
 
     training_params = dump_internal_model(request.training)
     training_params["output_dir"] = str(output_dir)
+    embodiment_config = (
+        _build_embodiment_config(request)
+        if _model_architecture(request) == "dreamzero"
+        else None
+    )
+    model_config = _build_model_config(request, embodiment_config)
+
+    training_config = {
+        "job_id": job_id,
+        "dataset": _build_dataset_config(request, dataset),
+        "model": model_config,
+        "training": training_params,
+        "tracker": tracker_config,
+        "device": request.compute.device,
+    }
+    if embodiment_config is not None:
+        training_config["embodiment"] = embodiment_config
 
     return TrainingLaunchContract(
         dataset=dataset,
         output_dir=output_dir,
         tracker_config=tracker_config,
         compute_config=compute_config,
-        training_config={
-            "job_id": job_id,
-            "dataset": _build_dataset_config(request, dataset),
-            "model": dump_internal_model(request.model),
-            "training": training_params,
-            "tracker": tracker_config,
-            "device": request.compute.device,
-        },
+        training_config=training_config,
     )

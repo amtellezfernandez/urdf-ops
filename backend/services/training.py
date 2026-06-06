@@ -117,6 +117,32 @@ MODEL_ARCHITECTURES: Dict[str, ModelArchitectureInfo] = {
         },
         recommended_for=["diverse demonstrations", "multimodal behavior"],
     ),
+    "dreamzero": ModelArchitectureInfo(
+        name="dreamzero",
+        display_name="DreamZero",
+        description=(
+            "World action model runner with URDF-derived action schemas. SO-101 weights can be used "
+            "as a preset, while other robots require a matching DreamZero-compatible runner."
+        ),
+        default_config={
+            "base_model_id": "Wan-AI/Wan2.1-I2V-14B-480P",
+            "adapter_model_id": "Vizuara/dreamzero-so101-lora",
+            "action_horizon": 24,
+            "video_frames": 33,
+            "image_width": 320,
+            "image_height": 176,
+            "action_units": "urdf-native",
+            "runner_script": "",
+            "runner_module": "",
+        },
+        config_schema={
+            "action_horizon": {"type": "int", "min": 1, "max": 128},
+            "video_frames": {"type": "int", "min": 1, "max": 128},
+            "runner_script": {"type": "string"},
+            "runner_module": {"type": "string"},
+        },
+        recommended_for=["world models", "video-conditioned actions", "URDF action schemas"],
+    ),
     "tdmpc": ModelArchitectureInfo(
         name="tdmpc",
         display_name="TD-MPC",
