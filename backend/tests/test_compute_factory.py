@@ -10,6 +10,7 @@ from backend.robotops.compute_factory import (
     ComputeConfig,
 )
 from backend.robotops.compute.local_compute import LocalCompute
+from backend.robotops.compute.ssh_compute import SSHDockerCompute
 from backend.robotops.compute_protocol import JobState
 
 
@@ -65,6 +66,27 @@ def test_compute_cache_key_does_not_store_plaintext_api_key() -> None:
     assert "api_key_sha256" in cache_key
     assert "access_token_sha256" in cache_key
     assert "password_sha256" in cache_key
+
+
+def test_get_compute_creates_ssh_backend() -> None:
+    _COMPUTE_INSTANCES.clear()
+
+    compute = get_compute(
+        {
+            "type": "ssh",
+            "ssh_host": "203.0.113.10",
+            "ssh_user": "ubuntu",
+            "ssh_port": 2222,
+            "remote_output_dir": "/scratch/robotops",
+            "docker_image": "urdf-ops:training",
+        }
+    )
+
+    assert isinstance(compute, SSHDockerCompute)
+    assert compute.host == "203.0.113.10"
+    assert compute.user == "ubuntu"
+    assert compute.port == 2222
+    assert compute.output_dir == "/scratch/robotops"
 
 
 

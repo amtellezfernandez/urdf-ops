@@ -58,6 +58,7 @@ from backend.services.training_params import (
     TRAINING_CLOUD_COMPUTE_TYPES,
     TRAINING_CLOUD_CONTROL_REQUIRED_CAPABILITIES,
     TRAINING_COMPUTE_BACKEND_LABELS,
+    TRAINING_BYOC_COMPUTE_TYPES,
     TRAINING_LEROBOT_PYTHON_ENV,
     TRAINING_LEROBOT_TOOLCHAIN_DIRNAME,
     TRAINING_LOCAL_COMPUTE_TYPE,
@@ -408,7 +409,7 @@ def _resolve_lerobot_python_path() -> Path:
 
 
 def _is_training_compute_backend_enabled(compute_type: str) -> bool:
-    return compute_type == TRAINING_LOCAL_COMPUTE_TYPE
+    return compute_type == TRAINING_LOCAL_COMPUTE_TYPE or compute_type in TRAINING_BYOC_COMPUTE_TYPES
 
 
 def list_training_compute_backends() -> TrainingComputeBackendsResponse:
@@ -420,6 +421,15 @@ def list_training_compute_backends() -> TrainingComputeBackendsResponse:
             production_ready=True,
         )
     ]
+    for compute_type in TRAINING_BYOC_COMPUTE_TYPES:
+        backends.append(
+            TrainingComputeBackendCapability(
+                type=compute_type,
+                label=TRAINING_COMPUTE_BACKEND_LABELS[compute_type],
+                enabled=True,
+                production_ready=True,
+            )
+        )
 
     for compute_type in (*TRAINING_CLOUD_COMPUTE_TYPES, *TRAINING_PLANNED_COMPUTE_TYPES):
         backends.append(
@@ -438,6 +448,8 @@ def list_training_compute_backends() -> TrainingComputeBackendsResponse:
 
 def validate_training_compute_backend(compute: ComputeConfig) -> Optional[str]:
     compute_type = _get_enum_value(compute.type)
+    if compute_type == "ssh" and (not compute.ssh_host or not compute.ssh_user):
+        return "Remote Docker training requires an SSH host and user."
     if _is_training_compute_backend_enabled(compute_type):
         return None
     return TRAINING_CLOUD_COMPUTE_DISABLED_MESSAGE
@@ -449,6 +461,8 @@ async def list_training_compute_instances() -> Dict[str, list]:
     instances: Dict[str, list] = {
         TRAINING_LOCAL_COMPUTE_TYPE: await LocalCompute().get_available_instances(),
     }
+    for compute_type in TRAINING_BYOC_COMPUTE_TYPES:
+        instances[compute_type] = []
     for compute_type in (*TRAINING_CLOUD_COMPUTE_TYPES, *TRAINING_PLANNED_COMPUTE_TYPES):
         instances[compute_type] = []
     return instances

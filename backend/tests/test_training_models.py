@@ -30,6 +30,7 @@ from backend.services.training_params import (
 
 
 TEST_BATCH_SIZE = 4
+TEST_MAX_STEPS = 2
 TEST_DATASET_REPO_ID = "lerobot/pusht"
 TEST_JOB_ID = "train_1234"
 TEST_COMPUTE_JOB_ID = "local_1234"
@@ -102,13 +103,14 @@ def test_training_start_request_accepts_ui_camel_case_payloads() -> None:
         {
             "dataset": {"source": "huggingface", "repoId": TEST_DATASET_REPO_ID},
             "model": {"architecture": ModelArchitecture.DIFFUSION_POLICY.value},
-            "training": {"batchSize": TEST_BATCH_SIZE},
+            "training": {"batchSize": TEST_BATCH_SIZE, "maxSteps": TEST_MAX_STEPS},
         }
     )
 
     assert request.dataset.repo_id == TEST_DATASET_REPO_ID
     assert request.model.architecture == ModelArchitecture.DIFFUSION_POLICY.value
     assert request.training.batch_size == TEST_BATCH_SIZE
+    assert request.training.max_steps == TEST_MAX_STEPS
 
 
 def test_training_responses_serialize_to_ui_camel_case() -> None:
@@ -127,7 +129,7 @@ def test_training_service_internal_dump_keeps_script_snake_case() -> None:
     request = TrainingStartRequest.model_validate(
         {
             "dataset": {"repoId": TEST_DATASET_REPO_ID},
-            "training": {"batchSize": TEST_BATCH_SIZE},
+            "training": {"batchSize": TEST_BATCH_SIZE, "maxSteps": TEST_MAX_STEPS},
         }
     )
 
@@ -137,7 +139,9 @@ def test_training_service_internal_dump_keeps_script_snake_case() -> None:
     assert dataset_config["repo_id"] == TEST_DATASET_REPO_ID
     assert "repoId" not in dataset_config
     assert training_config["batch_size"] == TEST_BATCH_SIZE
+    assert training_config["max_steps"] == TEST_MAX_STEPS
     assert "batchSize" not in training_config
+    assert "maxSteps" not in training_config
 
 
 def test_training_model_catalog_uses_lerobot_architecture_names() -> None:
@@ -179,6 +183,8 @@ def test_training_compute_backends_fail_closed_for_cloud_providers() -> None:
 
     assert backends_by_type["local"].enabled is True
     assert backends_by_type["local"].production_ready is True
+    assert backends_by_type["ssh"].enabled is True
+    assert backends_by_type["ssh"].production_ready is True
     assert backends_by_type["modal"].enabled is False
     assert backends_by_type["runpod"].enabled is False
     assert backends_by_type["macrodata"].enabled is False
@@ -199,6 +205,54 @@ def test_training_compute_validation_rejects_cloud_credentials() -> None:
     )
 
     assert validate_training_compute_backend(request.compute) == TRAINING_CLOUD_COMPUTE_DISABLED_MESSAGE
+
+
+def test_training_compute_validation_requires_ssh_target() -> None:
+    request = TrainingStartRequest.model_validate(
+        {
+            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "model": {"architecture": ModelArchitecture.ACT.value},
+            "compute": {"type": "ssh", "sshUser": "ubuntu"},
+        }
+    )
+
+    assert validate_training_compute_backend(request.compute) == "Remote Docker training requires an SSH host and user."
+
+
+def test_training_launch_contract_maps_ssh_compute_config() -> None:
+    request = TrainingStartRequest.model_validate(
+        {
+            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "model": {"architecture": ModelArchitecture.ACT.value},
+            "compute": {
+                "type": "ssh",
+                "sshHost": "203.0.113.10",
+                "sshUser": "ubuntu",
+                "sshPort": 2222,
+                "sshKeyPath": "~/.ssh/robotops",
+                "remoteOutputDir": "/scratch/robotops",
+                "dockerImage": "urdf-ops:training",
+                "dockerArgs": "--shm-size 8g",
+                "device": "cuda",
+            },
+        }
+    )
+
+    contract = build_training_launch_contract(
+        request,
+        job_id=TEST_JOB_ID,
+        lerobot_python_path=Path("/tmp/python"),
+    )
+
+    assert contract.compute_config["type"] == "ssh"
+    assert contract.compute_config["host"] == "203.0.113.10"
+    assert contract.compute_config["user"] == "ubuntu"
+    assert contract.compute_config["port"] == 2222
+    assert contract.compute_config["key_path"] == "~/.ssh/robotops"
+    assert contract.compute_config["output_dir"] == "/scratch/robotops"
+    assert contract.compute_config["docker_image"] == "urdf-ops:training"
+    assert contract.compute_config["docker_args"] == "--shm-size 8g"
+    assert contract.compute_config["use_gpu"] is True
 
 
 def test_training_launch_contract_rejects_missing_dataset_repo() -> None:

@@ -64,6 +64,7 @@ class ComputeType(str, Enum):
     """Compute backend for training."""
 
     LOCAL = "local"
+    SSH = "ssh"
     MODAL = "modal"
     RUNPOD = "runpod"
     MACRODATA = "macrodata"
@@ -138,6 +139,11 @@ class TrainingParams(TrainingApiModel):
     batch_size: int = Field(default=32, ge=1, description="Batch size")
     learning_rate: float = Field(default=1e-4, gt=0, description="Learning rate")
     epochs: int = Field(default=100, ge=1, description="Number of epochs")
+    max_steps: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Optional hard limit on optimizer steps for bounded smoke runs",
+    )
     seed: int = Field(default=42, description="Random seed")
 
     # Optimization
@@ -242,6 +248,23 @@ class ComputeConfig(TrainingApiModel):
         default=4.0,
         description="Maximum training duration",
     )
+    ssh_host: Optional[str] = Field(default=None, description="SSH host or IP for remote Docker training")
+    ssh_user: Optional[str] = Field(default=None, description="SSH username")
+    ssh_port: int = Field(default=22, ge=1, le=65535, description="SSH port")
+    ssh_key_path: Optional[str] = Field(
+        default=None,
+        description="Path to SSH private key on the URDF Ops backend machine",
+    )
+    remote_output_dir: str = Field(
+        default="/tmp/robotops-outputs",
+        description="Remote artifact output directory",
+    )
+    docker_image: str = Field(
+        default="urdf-ops:training",
+        description="Remote trainer Docker image",
+    )
+    docker_args: Optional[str] = Field(default=None, description="Additional docker run arguments")
+    ssh_options: Optional[str] = Field(default=None, description="Additional ssh/scp options")
 
 
 # ============================================================================

@@ -1,0 +1,9 @@
+.git
+.pytest_cache
+.venv
+.venv-lerobot
+node_modules
+web/node_modules
+outputs
+__pycache__
+*.pyc

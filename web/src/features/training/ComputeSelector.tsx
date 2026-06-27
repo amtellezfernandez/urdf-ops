@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Cloud, Cpu, Info, Lock, Server, Zap } from "lucide-react";
 
 import { Label } from "@/shared/ui/label";
+import { Input } from "@/shared/ui/input";
 import {
   Select,
   SelectContent,
@@ -25,6 +26,7 @@ import type { ComputeInstanceInfo, TrainingComputeBackendCapability } from "./ty
 
 const COMPUTE_BACKEND_ICONS: Record<TrainingComputeBackendId, typeof Cpu> = {
   local: Cpu,
+  ssh: Server,
   modal: Cloud,
   runpod: Zap,
   macrodata: Cloud,
@@ -68,7 +70,7 @@ export function ComputeSelector() {
   }, []);
 
   useEffect(() => {
-    if (computeConfig.type !== "local") {
+    if (!["local", "ssh"].includes(computeConfig.type)) {
       setComputeConfig({ type: "local", apiKey: undefined, gpu: undefined });
     }
   }, [computeConfig.type, setComputeConfig]);
@@ -125,7 +127,9 @@ export function ComputeSelector() {
                         }`}
                       >
                         {enabled
-                          ? TRAINING_COMPUTE_PARAMS.localReadyBadge
+                          ? backend.id === "ssh"
+                            ? TRAINING_COMPUTE_PARAMS.remoteReadyBadge
+                            : TRAINING_COMPUTE_PARAMS.localReadyBadge
                           : TRAINING_COMPUTE_PARAMS.cloudUnavailableBadge}
                       </span>
                     </div>
@@ -147,7 +151,9 @@ export function ComputeSelector() {
       <div className="space-y-3 rounded-lg bg-muted/30 p-4">
         <div className="flex items-center gap-2">
           <Info className="h-4 w-4 text-muted-foreground" />
-          <Label>Local Configuration</Label>
+          <Label>
+            {computeConfig.type === "ssh" ? "Remote Docker Configuration" : "Local Configuration"}
+          </Label>
         </div>
 
         <div className="space-y-1">
@@ -169,7 +175,82 @@ export function ComputeSelector() {
           </Select>
         </div>
 
-        <p className="text-xs text-muted-foreground">{localInstanceSummary}</p>
+        {computeConfig.type === "ssh" ? (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="training-ssh-host" className="text-xs">Host / IP</Label>
+              <Input
+                id="training-ssh-host"
+                value={computeConfig.sshHost || ""}
+                onChange={(event) => setComputeConfig({ sshHost: event.target.value })}
+                className="h-8 text-sm"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="training-ssh-user" className="text-xs">User</Label>
+              <Input
+                id="training-ssh-user"
+                value={computeConfig.sshUser || ""}
+                onChange={(event) => setComputeConfig({ sshUser: event.target.value })}
+                className="h-8 text-sm"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="training-ssh-port" className="text-xs">Port</Label>
+              <Input
+                id="training-ssh-port"
+                type="number"
+                min={1}
+                max={65535}
+                value={computeConfig.sshPort || 22}
+                onChange={(event) =>
+                  setComputeConfig({ sshPort: parseInt(event.target.value, 10) || 22 })
+                }
+                className="h-8 text-sm"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="training-ssh-key" className="text-xs">SSH Key Path</Label>
+              <Input
+                id="training-ssh-key"
+                value={computeConfig.sshKeyPath || ""}
+                onChange={(event) => setComputeConfig({ sshKeyPath: event.target.value })}
+                placeholder="~/.ssh/id_rsa"
+                className="h-8 text-sm"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="training-ssh-output" className="text-xs">Remote Output</Label>
+              <Input
+                id="training-ssh-output"
+                value={computeConfig.remoteOutputDir || ""}
+                onChange={(event) => setComputeConfig({ remoteOutputDir: event.target.value })}
+                className="h-8 text-sm"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="training-ssh-image" className="text-xs">Trainer Image</Label>
+              <Input
+                id="training-ssh-image"
+                value={computeConfig.dockerImage || ""}
+                onChange={(event) => setComputeConfig({ dockerImage: event.target.value })}
+                className="h-8 text-sm"
+              />
+            </div>
+            <div className="col-span-2 space-y-1">
+              <Label htmlFor="training-ssh-docker-args" className="text-xs">Docker Args</Label>
+              <Input
+                id="training-ssh-docker-args"
+                value={computeConfig.dockerArgs || ""}
+                onChange={(event) => setComputeConfig({ dockerArgs: event.target.value })}
+                placeholder="--shm-size 8g"
+                className="h-8 text-sm"
+              />
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">{localInstanceSummary}</p>
+        )}
       </div>
 
       <div className="rounded-lg bg-muted/50 p-3">

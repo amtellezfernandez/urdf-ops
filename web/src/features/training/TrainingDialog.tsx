@@ -136,6 +136,7 @@ export function TrainingDialog() {
           batch_size: trainingParams.batchSize,
           learning_rate: trainingParams.learningRate,
           epochs: trainingParams.epochs,
+          max_steps: trainingParams.maxSteps,
           seed: trainingParams.seed,
           gradient_accumulation_steps: trainingParams.gradientAccumulationSteps,
           max_grad_norm: trainingParams.maxGradNorm,
@@ -162,6 +163,14 @@ export function TrainingDialog() {
           api_key: computeConfig.apiKey,
           use_spot: computeConfig.useSpot,
           timeout_hours: computeConfig.timeoutHours,
+          ssh_host: computeConfig.sshHost,
+          ssh_user: computeConfig.sshUser,
+          ssh_port: computeConfig.sshPort || 22,
+          ssh_key_path: computeConfig.sshKeyPath,
+          remote_output_dir: computeConfig.remoteOutputDir || "/tmp/robotops-outputs",
+          docker_image: computeConfig.dockerImage || "urdf-ops:training",
+          docker_args: computeConfig.dockerArgs,
+          ssh_options: computeConfig.sshOptions,
         },
       };
 

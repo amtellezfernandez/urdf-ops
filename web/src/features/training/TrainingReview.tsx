@@ -198,6 +198,7 @@ export function TrainingReview() {
           <div>Batch size: {trainingParams.batchSize}</div>
           <div>Learning rate: {trainingParams.learningRate}</div>
           <div>Epochs: {trainingParams.epochs}</div>
+          <div>Max steps: {trainingParams.maxSteps || "full run"}</div>
           <div>Scheduler: {trainingParams.lrScheduler}</div>
           <div>Warmup: {trainingParams.warmupSteps} steps</div>
           <div>Checkpoints: every {trainingParams.checkpointInterval} epochs</div>
@@ -231,6 +232,14 @@ export function TrainingReview() {
         <div className="space-y-1">
           <div>{TRAINING_COMPUTE_BACKEND_NAMES[computeConfig.type]}</div>
           <div className="text-xs opacity-75">Device: {computeConfig.device}</div>
+          {computeConfig.type === "ssh" ? (
+            <div className="text-xs opacity-75">
+              SSH: {computeConfig.sshUser || "user"}@{computeConfig.sshHost || "host"}:
+              {computeConfig.sshPort || 22}
+              <br />
+              Image: <span className="font-mono">{computeConfig.dockerImage || "urdf-ops:training"}</span>
+            </div>
+          ) : null}
           {computeBlockReason ? (
             <div className="text-xs text-amber-600">{computeBlockReason}</div>
           ) : null}
@@ -243,9 +252,9 @@ export function TrainingReview() {
           <div className="flex items-start gap-2">
             <AlertCircle className="w-4 h-4 text-amber-500 mt-0.5" />
             <div>
-              <div className="text-sm font-medium text-amber-600">Compute Disabled</div>
+              <div className="text-sm font-medium text-amber-600">Compute Unavailable</div>
               <div className="text-xs text-muted-foreground">
-                {TRAINING_COMPUTE_PARAMS.cloudDisabledMessage}
+                {computeBlockReason}
               </div>
             </div>
           </div>

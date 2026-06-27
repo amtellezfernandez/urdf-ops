@@ -24,6 +24,16 @@ npm run dev
 
 Training endpoints are exposed under `/training/*`. URDF Studio can also launch this repo as a sibling checkout during `npm run start`.
 
+## Remote Docker Training
+
+URDF Ops can launch training on a user-managed SSH machine with Docker:
+
+```bash
+docker build --target trainer -t urdf-ops:training .
+```
+
+Copy or build that image on the remote machine, then select `Remote Docker machine` in the training dialog and provide the SSH host, user, key path, remote output directory, and image name. Managed cloud providers remain disabled until provider submission, log streaming, cancellation, and artifact retrieval are fully wired.
+
 ## Keypoint Observations
 
 UrdfOps owns dataset/perception keypoint extraction and validation. Downstream tools consume the stable contract instead of embedding camera-specific logic.
