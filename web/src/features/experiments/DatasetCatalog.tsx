@@ -84,6 +84,7 @@ export interface InitialExperimentDataset {
 const HF_DATASETS_STORAGE_KEY = "urdf-ops:hf-datasets";
 const EMPTY_DATASETS: DatasetCatalogItem[] = [];
 const MIX_REQUIRED_REPRESENTATION_ID = "rep:joint_pos_abs:semantic:v1";
+const MIX_UNKNOWN_EMBODIMENT_ID = "unknown:unfingerprinted";
 const MIX_POLL_INTERVAL_MS = 1_000;
 const MIX_MAX_POLLS = 180;
 
@@ -224,6 +225,7 @@ function buildMixPayload(sources: TrainingSetSource[]) {
       required_representation_id: MIX_REQUIRED_REPRESENTATION_ID,
       datasets: orderedSources.map((source) => ({
         dataset_id: source.kind === "huggingface" ? `hf:${source.value}` : `local:${source.name}`,
+        embodiment_id: MIX_UNKNOWN_EMBODIMENT_ID,
         representation_id: MIX_REQUIRED_REPRESENTATION_ID,
         naming_status: "named",
       })),
