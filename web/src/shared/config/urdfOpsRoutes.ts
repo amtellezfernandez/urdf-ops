@@ -9,6 +9,8 @@ export const URDF_OPS_QUERY_PARAMS = {
 
 export const URDF_OPS_TABS = {
   experiments: "experiments",
+  overview: "overview",
+  jobs: "jobs",
   metrics: "metrics",
   datasets: "datasets",
   review: "review",
@@ -24,7 +26,7 @@ export type BuildUrdfOpsUrlOptions = {
   reviewSessionId?: string | null;
 };
 
-export const URDF_OPS_DEFAULT_TAB: UrdfOpsTab = URDF_OPS_TABS.experiments;
+export const URDF_OPS_DEFAULT_TAB: UrdfOpsTab = URDF_OPS_TABS.datasets;
 
 const URDF_OPS_TAB_VALUES = new Set<string>(Object.values(URDF_OPS_TABS));
 

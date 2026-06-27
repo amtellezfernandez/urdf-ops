@@ -1,6 +1,14 @@
 import { useMemo, useState, type ComponentType } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { FlaskConical, BarChart2, Play, ChevronLeft, ArrowLeft } from "lucide-react";
+import {
+  BarChart2,
+  ChevronLeft,
+  ArrowLeft,
+  Database,
+  LayoutDashboard,
+  ListChecks,
+  Play,
+} from "lucide-react";
 
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/utils";
@@ -17,7 +25,11 @@ import {
 import { URDF_OPS_PAGE_CLASS_NAMES, URDF_OPS_PAGE_PARAMS } from "./urdfOpsPageParams";
 import { buildUrdfOpsInitialDataset } from "./urdfOpsPageData";
 
-type StandaloneUrdfOpsTab = Extract<UrdfOpsTab, "experiments" | "metrics" | "evaluation">;
+type StandaloneUrdfOpsTab = Extract<
+  UrdfOpsTab,
+  "datasets" | "overview" | "jobs" | "metrics" | "evaluation"
+>;
+type ExperimentViewTab = Extract<StandaloneUrdfOpsTab, "datasets" | "overview" | "jobs">;
 
 interface UrdfOpsNavItem {
   tab: StandaloneUrdfOpsTab;
@@ -26,14 +38,35 @@ interface UrdfOpsNavItem {
 }
 
 const URDF_OPS_NAV_ITEMS = [
-  { tab: URDF_OPS_TABS.experiments, label: "Experiments", Icon: FlaskConical },
+  { tab: URDF_OPS_TABS.datasets, label: "Datasets", Icon: Database },
+  { tab: URDF_OPS_TABS.overview, label: "Overview", Icon: LayoutDashboard },
+  { tab: URDF_OPS_TABS.jobs, label: "Jobs", Icon: ListChecks },
   { tab: URDF_OPS_TABS.metrics, label: "Metrics", Icon: BarChart2 },
   { tab: URDF_OPS_TABS.evaluation, label: "Evaluation", Icon: Play },
 ] satisfies readonly UrdfOpsNavItem[];
 
 const resolveStandaloneTab = (tab: UrdfOpsTab): StandaloneUrdfOpsTab => {
-  if (tab === URDF_OPS_TABS.metrics || tab === URDF_OPS_TABS.evaluation) return tab;
-  return URDF_OPS_TABS.experiments;
+  if (
+    tab === URDF_OPS_TABS.datasets ||
+    tab === URDF_OPS_TABS.overview ||
+    tab === URDF_OPS_TABS.jobs ||
+    tab === URDF_OPS_TABS.metrics ||
+    tab === URDF_OPS_TABS.evaluation
+  ) {
+    return tab;
+  }
+  return URDF_OPS_TABS.datasets;
+};
+
+const resolveExperimentView = (tab: StandaloneUrdfOpsTab): ExperimentViewTab | null => {
+  if (
+    tab === URDF_OPS_TABS.datasets ||
+    tab === URDF_OPS_TABS.overview ||
+    tab === URDF_OPS_TABS.jobs
+  ) {
+    return tab;
+  }
+  return null;
 };
 
 function NavItem({
@@ -144,6 +177,7 @@ export default function UrdfOps() {
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const selectedJobId = useExperimentStore((state) => state.selectedJobId);
+  const experimentView = resolveExperimentView(activeTab);
 
   const handleTabChange = (tab: StandaloneUrdfOpsTab) => {
     setSearchParams(buildUrdfOpsTabSearchParams(searchParams, tab), { replace: true });
@@ -160,8 +194,8 @@ export default function UrdfOps() {
 
       <main className="min-w-0 flex-1 overflow-hidden bg-background">
         <div className="h-full overflow-hidden">
-          {activeTab === URDF_OPS_TABS.experiments && (
-            <ExperimentDashboard initialDataset={initialDataset} />
+          {experimentView && (
+            <ExperimentDashboard activeView={experimentView} initialDataset={initialDataset} />
           )}
           {activeTab === URDF_OPS_TABS.metrics && (
             <div className="h-full overflow-auto p-5">
@@ -175,7 +209,7 @@ export default function UrdfOps() {
                     </div>
                     <h2 className="mb-2 text-lg font-medium">No job selected</h2>
                     <p className="mb-4 text-sm text-muted-foreground">Select a training job to view its metrics.</p>
-                    <Button onClick={() => handleTabChange(URDF_OPS_TABS.experiments)}>Open jobs</Button>
+                    <Button onClick={() => handleTabChange(URDF_OPS_TABS.jobs)}>Open jobs</Button>
                   </div>
                 )}
               </div>

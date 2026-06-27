@@ -175,10 +175,13 @@ export function DatasetCatalog({ initialDataset }: DatasetCatalogProps) {
     queryKey: ["datasets", "catalog"],
     queryFn: async () => {
       const response = await fetch(`${API_BASE_URL}/datasets/catalog`);
-      if (!response.ok) throw new Error("Failed to load dataset catalog");
+      if (!response.ok) {
+        throw new Error(`GET ${API_BASE_URL}/datasets/catalog returned ${response.status}`);
+      }
       return response.json();
     },
     staleTime: 5_000,
+    retry: false,
   });
 
   const datasets = data?.datasets ?? [];
@@ -186,6 +189,7 @@ export function DatasetCatalog({ initialDataset }: DatasetCatalogProps) {
     () => datasets.filter((dataset) => dataset.source === "studio_export"),
     [datasets],
   );
+  const catalogErrorMessage = error instanceof Error ? error.message : "Dataset catalog is unavailable";
   const normalizedHfDatasetId = normalizeHfDatasetId(hfDatasetId);
   const initialDatasetSelected =
     initialDataset?.source === "local"
@@ -336,15 +340,22 @@ export function DatasetCatalog({ initialDataset }: DatasetCatalogProps) {
         )}
 
         {!isLoading && error && (
-          <div className="px-3 py-8 text-center text-sm text-destructive">
-            Failed to load datasets.
+          <div className="border-b border-border/60 px-3 py-3">
+            <p className="text-sm font-medium">Local catalog unavailable</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {catalogErrorMessage}. Restart the URDF Ops backend to enable local
+              Studio export discovery. Hugging Face IDs and Studio deep links can
+              still be used.
+            </p>
           </div>
         )}
 
-        {!isLoading && !error && datasets.length === 0 && (
+        {!isLoading && datasets.length === 0 && (
           <div className="px-3 py-8 text-center">
-            <p className="text-sm font-medium">No local LeRobot datasets found</p>
-            {data?.roots?.length ? (
+            <p className="text-sm font-medium">
+              {error ? "No local datasets loaded" : "No local LeRobot datasets found"}
+            </p>
+            {!error && data?.roots?.length ? (
               <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
                 {data.roots.join(", ")}
               </p>

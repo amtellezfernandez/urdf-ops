@@ -1,12 +1,11 @@
 /**
- * ExperimentDashboard - Main dashboard page with tabs for experiments
+ * ExperimentDashboard - Main dashboard page for experiment views
  */
 
 import { useEffect, useMemo } from "react";
 import { FlaskConical, BarChart2, Database, Play } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/shared/ui/tabs";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/utils";
 
@@ -176,10 +175,31 @@ function JobsTab() {
 // ============================================================================
 
 interface ExperimentDashboardProps {
+  activeView?: ExperimentDashboardView;
   initialDataset?: InitialExperimentDataset | null;
 }
 
-export function ExperimentDashboard({ initialDataset = null }: ExperimentDashboardProps) {
+export type ExperimentDashboardView = "datasets" | "overview" | "jobs";
+
+const VIEW_COPY: Record<ExperimentDashboardView, { title: string; subtitle: string }> = {
+  datasets: {
+    title: "Datasets",
+    subtitle: "Studio LeRobot exports and training dataset sources",
+  },
+  overview: {
+    title: "Overview",
+    subtitle: "Monitor training activity and job health",
+  },
+  jobs: {
+    title: "Jobs",
+    subtitle: "Inspect, filter, and manage training jobs",
+  },
+};
+
+export function ExperimentDashboard({
+  activeView = "datasets",
+  initialDataset = null,
+}: ExperimentDashboardProps) {
   const reset = useExperimentStore((state) => state.reset);
   const hasActiveJobs = useExperimentStore(selectHasActiveJobs);
   const page = useExperimentStore((state) => state.page);
@@ -188,6 +208,7 @@ export function ExperimentDashboard({ initialDataset = null }: ExperimentDashboa
   const setIsLoading = useExperimentStore((state) => state.setIsLoading);
   const setError = useExperimentStore((state) => state.setError);
   const openTrainingDialog = useTrainingStore((state) => state.openDialog);
+  const viewCopy = VIEW_COPY[activeView];
   const {
     data: jobsData,
     error: jobsError,
@@ -231,9 +252,9 @@ export function ExperimentDashboard({ initialDataset = null }: ExperimentDashboa
       {/* Header */}
       <div className={EXPERIMENT_DASHBOARD_CLASS_NAMES.header}>
         <div>
-          <h1 className={EXPERIMENT_DASHBOARD_CLASS_NAMES.title}>Experiments</h1>
+          <h1 className={EXPERIMENT_DASHBOARD_CLASS_NAMES.title}>{viewCopy.title}</h1>
           <p className={EXPERIMENT_DASHBOARD_CLASS_NAMES.subtitle}>
-            Monitor and manage your training jobs
+            {viewCopy.subtitle}
           </p>
         </div>
         <Button onClick={openTrainingDialog} className={EXPERIMENT_DASHBOARD_CLASS_NAMES.actionButton}>
@@ -243,31 +264,15 @@ export function ExperimentDashboard({ initialDataset = null }: ExperimentDashboa
       </div>
 
       {/* Content */}
-      <div className={EXPERIMENT_DASHBOARD_CLASS_NAMES.content}>
-        <Tabs defaultValue="datasets" className="h-full flex flex-col">
-          <TabsList className={EXPERIMENT_DASHBOARD_CLASS_NAMES.tabsList}>
-            <TabsTrigger value="datasets" className={EXPERIMENT_DASHBOARD_CLASS_NAMES.tabTrigger}>Datasets</TabsTrigger>
-            <TabsTrigger value="overview" className={EXPERIMENT_DASHBOARD_CLASS_NAMES.tabTrigger}>Overview</TabsTrigger>
-            <TabsTrigger value="jobs" className={EXPERIMENT_DASHBOARD_CLASS_NAMES.tabTrigger}>
-              Jobs
-              {hasActiveJobs && (
-                <span className="ml-2 h-2 w-2 rounded-full bg-sky-500 animate-pulse" />
-              )}
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="datasets" className="flex-1 overflow-auto">
-            <DatasetCatalog initialDataset={initialDataset} />
-          </TabsContent>
-
-          <TabsContent value="overview" className="flex-1 overflow-auto">
-            <OverviewTab />
-          </TabsContent>
-
-          <TabsContent value="jobs" className="flex-1 overflow-hidden">
-            <JobsTab />
-          </TabsContent>
-        </Tabs>
+      <div
+        className={cn(
+          EXPERIMENT_DASHBOARD_CLASS_NAMES.content,
+          activeView === "jobs" ? "overflow-hidden" : "overflow-auto",
+        )}
+      >
+        {activeView === "datasets" && <DatasetCatalog initialDataset={initialDataset} />}
+        {activeView === "overview" && <OverviewTab />}
+        {activeView === "jobs" && <JobsTab />}
       </div>
       <TrainingDialog />
     </div>

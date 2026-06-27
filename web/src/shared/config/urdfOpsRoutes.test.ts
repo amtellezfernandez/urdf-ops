@@ -35,6 +35,15 @@ describe("UrdfOps route contract", () => {
     ).toBe("/urdfops?tab=review&session=session%2Fa");
   });
 
+  it("builds lateral experiment view links", () => {
+    expect(buildUrdfOpsUrl({ tab: URDF_OPS_TABS.overview })).toBe(
+      "/urdfops?tab=overview",
+    );
+    expect(buildUrdfOpsUrl({ tab: URDF_OPS_TABS.jobs })).toBe(
+      "/urdfops?tab=jobs",
+    );
+  });
+
   it("builds browser hrefs under the configured app base path", () => {
     expect(
       buildUrdfOpsBrowserUrl(
@@ -65,10 +74,10 @@ describe("UrdfOps route contract", () => {
 
     const nextParams = buildUrdfOpsTabSearchParams(
       currentParams,
-      URDF_OPS_TABS.experiments,
+      URDF_OPS_TABS.jobs,
     );
 
-    expect(nextParams.get(URDF_OPS_QUERY_PARAMS.tab)).toBe(URDF_OPS_TABS.experiments);
+    expect(nextParams.get(URDF_OPS_QUERY_PARAMS.tab)).toBe(URDF_OPS_TABS.jobs);
     expect(nextParams.get(URDF_OPS_QUERY_PARAMS.dataset)).toBe(
       "owner/robotics dataset",
     );
