@@ -90,6 +90,27 @@ class DatasetTreatmentAnalysisResponse(BaseModel):
     treatment_manifest: DatasetTreatmentManifest
 
 
+class DatasetCatalogItem(BaseModel):
+    id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+    source: Literal["studio_export", "local"]
+    path: str = Field(..., min_length=1)
+    format_version: str | None = None
+    robot_type: str | None = None
+    task: str | None = None
+    total_episodes: int | None = Field(default=None, ge=0)
+    total_frames: int | None = Field(default=None, ge=0)
+    fps: float | None = None
+    export_mode: str | None = None
+    recording_id: str | None = None
+    created_at: str | None = None
+
+
+class DatasetCatalogResponse(BaseModel):
+    datasets: list[DatasetCatalogItem] = Field(default_factory=list)
+    roots: list[str] = Field(default_factory=list)
+
+
 class DatasetMixArtifactRef(BaseModel):
     store_kind: Literal["local"]
     object_path: str = Field(..., min_length=1)

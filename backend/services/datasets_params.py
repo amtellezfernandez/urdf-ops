@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from backend.services.teleop_replay_params import TELEOP_REPLAY_OUTPUT_ROOT
+
 SECONDS_PER_MINUTE = 60
 PATH_LIST_SEPARATOR = os.pathsep
 BYTES_PER_KIB = 1024
@@ -12,6 +14,9 @@ DATASET_MIX_SCRIPT_TIMEOUT_SEC = 5 * SECONDS_PER_MINUTE
 DEFAULT_DATASET_MIX_ARCHIVE_MAX_ENTRY_COUNT = 2_000
 DEFAULT_DATASET_MIX_ARCHIVE_MAX_ENTRY_BYTES = 64 * BYTES_PER_MIB
 DEFAULT_DATASET_MIX_ARCHIVE_MAX_TOTAL_BYTES = 512 * BYTES_PER_MIB
+DEFAULT_DATASET_MIX_ALLOWED_LOCAL_ROOTS = (
+    TELEOP_REPLAY_OUTPUT_ROOT.resolve(strict=False),
+)
 
 
 def _read_int_env(name: str, default: int) -> int:
@@ -26,15 +31,14 @@ def _read_int_env(name: str, default: int) -> int:
 
 
 def _read_allowed_local_roots() -> tuple[Path, ...]:
+    roots: list[Path] = list(DEFAULT_DATASET_MIX_ALLOWED_LOCAL_ROOTS)
     raw = os.getenv("URDF_DATASET_MIX_ALLOWED_LOCAL_ROOTS", "").strip()
-    if not raw:
-        return ()
-    roots: list[Path] = []
-    for entry in raw.split(PATH_LIST_SEPARATOR):
-        normalized = entry.strip()
-        if not normalized:
-            continue
-        roots.append(Path(normalized).expanduser().resolve(strict=False))
+    if raw:
+        for entry in raw.split(PATH_LIST_SEPARATOR):
+            normalized = entry.strip()
+            if not normalized:
+                continue
+            roots.append(Path(normalized).expanduser().resolve(strict=False))
     return tuple(dict.fromkeys(roots))
 
 

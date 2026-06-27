@@ -16,6 +16,7 @@ from backend.models.dataset_alignment import (
     MappingSpec,
 )
 from backend.models.datasets import (
+    DatasetCatalogResponse,
     DatasetMixRequest,
     DatasetMixResponse,
     DatasetTreatmentAnalysisResponse,
@@ -23,6 +24,7 @@ from backend.models.datasets import (
 from backend.services.dataset_alignment import get_dataset_alignment_service
 from backend.services.datasets import (
     get_dataset_mix_job,
+    list_dataset_catalog,
     mix_datasets,
     normalize_local_dataset_paths,
 )
@@ -97,6 +99,12 @@ def hf_proxy(
             status_code=502,
             detail=f"Failed to fetch Hugging Face resource: {error}",
         ) from error
+
+
+@router.get("/catalog", response_model=DatasetCatalogResponse)
+def datasets_catalog() -> DatasetCatalogResponse:
+    """List local LeRobot datasets visible to URDF Ops."""
+    return list_dataset_catalog()
 
 
 @router.post("/mix", response_model=DatasetMixResponse)

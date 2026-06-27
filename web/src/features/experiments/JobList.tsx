@@ -2,7 +2,7 @@
  * JobList component - Table of training jobs with filters
  */
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   Play,
   CheckCircle,
@@ -27,51 +27,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/select";
-import { API_BASE_URL } from "@/shared/config/api";
 import { cn } from "@/shared/lib/utils";
 
-import { useExperimentStore, selectFilteredJobs } from "./useExperimentStore";
+import { filterExperimentJobs, useExperimentStore } from "./useExperimentStore";
 import type { TrainingJob, JobStatus, JobFilterStatus, JobsListResponse } from "./types";
+import { fetchTrainingJobs } from "./trainingJobsApi";
 import {
   JOB_LIST_CLASS_NAMES,
   JOB_LIST_PARAMS,
 } from "./jobListParams";
-
-type TrainingJobSummaryPayload = {
-  jobId: string;
-  status: JobStatus;
-  runName?: string | null;
-  modelArchitecture?: string | null;
-  datasetId?: string | null;
-  startedAt?: string | null;
-  finishedAt?: string | null;
-  computeBackend?: string | null;
-};
-
-type TrainingJobsListPayload = {
-  jobs: TrainingJobSummaryPayload[];
-  total: number;
-};
-
-function inferDatasetSource(datasetId: string): TrainingJob["datasetSource"] {
-  return datasetId.startsWith("/") || datasetId.startsWith(".") ? "local" : "huggingface";
-}
-
-function mapJobSummary(summary: TrainingJobSummaryPayload): TrainingJob {
-  const modelArchitecture = summary.modelArchitecture || "unknown";
-  const datasetId = summary.datasetId || "unknown";
-  return {
-    id: summary.jobId,
-    name: summary.runName || `${modelArchitecture} ${summary.jobId.slice(0, JOB_LIST_PARAMS.jobIdPreviewLength)}`,
-    status: summary.status,
-    modelArchitecture,
-    datasetId,
-    datasetSource: inferDatasetSource(datasetId),
-    computeBackend: summary.computeBackend || "local",
-    startedAt: summary.startedAt || new Date(0).toISOString(),
-    finishedAt: summary.finishedAt || undefined,
-  };
-}
 
 // ============================================================================
 // Status Helpers
@@ -348,7 +312,7 @@ export function JobList() {
     pollIntervalId,
   } = useExperimentStore();
 
-  const filteredJobs = useExperimentStore(selectFilteredJobs);
+  const filteredJobs = useMemo(() => filterExperimentJobs(jobs, filters), [jobs, filters]);
   const hasFilters =
     filters.status !== "all" ||
     !!filters.modelArchitecture ||
@@ -357,17 +321,7 @@ export function JobList() {
   // Fetch jobs
   const { data, refetch, isFetching } = useQuery<JobsListResponse>({
     queryKey: ["jobs", page, pageSize],
-    queryFn: async () => {
-      const response = await fetch(`${API_BASE_URL}/training/jobs?limit=${pageSize}`);
-      if (!response.ok) throw new Error("Failed to fetch jobs");
-      const payload: TrainingJobsListPayload = await response.json();
-      return {
-        jobs: payload.jobs.map(mapJobSummary),
-        total: payload.total,
-        page,
-        pageSize,
-      };
-    },
+    queryFn: () => fetchTrainingJobs(page, pageSize),
     staleTime: JOB_LIST_PARAMS.queryStaleTimeMs,
   });
 

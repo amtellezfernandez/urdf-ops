@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.api.datasets import router as datasets_router
 from backend.api.keypoint_observations import router as keypoint_observations_router
 from backend.api.training import router as training_router
 
@@ -22,6 +23,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(training_router)
+    app.include_router(datasets_router)
     app.include_router(keypoint_observations_router)
     return app
 

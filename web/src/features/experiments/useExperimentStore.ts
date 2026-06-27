@@ -180,24 +180,27 @@ export const useExperimentStore = create<ExperimentState>((set, get) => ({
 // Selectors
 // ============================================================================
 
-export const selectFilteredJobs = (state: ExperimentState): TrainingJob[] => {
-  let filtered = state.jobs;
+export const filterExperimentJobs = (
+  jobs: TrainingJob[],
+  filters: JobFilters,
+): TrainingJob[] => {
+  let filtered = jobs;
 
   // Filter by status
-  if (state.filters.status !== "all") {
-    filtered = filtered.filter((job) => job.status === state.filters.status);
+  if (filters.status !== "all") {
+    filtered = filtered.filter((job) => job.status === filters.status);
   }
 
   // Filter by model architecture
-  if (state.filters.modelArchitecture) {
+  if (filters.modelArchitecture) {
     filtered = filtered.filter(
-      (job) => job.modelArchitecture === state.filters.modelArchitecture
+      (job) => job.modelArchitecture === filters.modelArchitecture
     );
   }
 
   // Filter by search query
-  if (state.filters.searchQuery) {
-    const query = state.filters.searchQuery.toLowerCase();
+  if (filters.searchQuery) {
+    const query = filters.searchQuery.toLowerCase();
     filtered = filtered.filter(
       (job) =>
         job.name.toLowerCase().includes(query) ||
@@ -207,8 +210,8 @@ export const selectFilteredJobs = (state: ExperimentState): TrainingJob[] => {
   }
 
   // Filter by date range
-  if (state.filters.dateRange) {
-    const { start, end } = state.filters.dateRange;
+  if (filters.dateRange) {
+    const { start, end } = filters.dateRange;
     filtered = filtered.filter((job) => {
       const jobDate = new Date(job.startedAt);
       return jobDate >= new Date(start) && jobDate <= new Date(end);
@@ -218,12 +221,14 @@ export const selectFilteredJobs = (state: ExperimentState): TrainingJob[] => {
   return filtered;
 };
 
-export const selectRunningJobs = (state: ExperimentState): TrainingJob[] => {
-  return state.jobs.filter(
-    (job) => job.status === "running" || job.status === "pending" || job.status === "queued"
-  );
+const isActiveExperimentJob = (job: TrainingJob): boolean => {
+  return job.status === "running" || job.status === "pending" || job.status === "queued";
+};
+
+export const getRunningExperimentJobs = (jobs: TrainingJob[]): TrainingJob[] => {
+  return jobs.filter(isActiveExperimentJob);
 };
 
 export const selectHasActiveJobs = (state: ExperimentState): boolean => {
-  return selectRunningJobs(state).length > 0;
+  return state.jobs.some(isActiveExperimentJob);
 };

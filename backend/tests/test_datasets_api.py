@@ -4,8 +4,11 @@ import pytest
 from fastapi import HTTPException
 
 import backend.api.datasets as datasets_api
+from backend.app import create_app
 from backend.models.dataset_alignment import DatasetRepresentationValidationResponse
 from backend.models.datasets import (
+    DatasetCatalogItem,
+    DatasetCatalogResponse,
     DatasetMixRequest,
     DatasetMixResponse,
     DatasetTreatmentAnalysisResponse,
@@ -13,6 +16,35 @@ from backend.models.datasets import (
     DatasetTreatmentSourceManifest,
     DatasetTreatmentStats,
 )
+
+
+def test_datasets_router_is_registered_on_backend_app() -> None:
+    app = create_app()
+    registered_paths = {route.path for route in app.routes}
+
+    assert "/datasets/catalog" in registered_paths
+    assert "/datasets/hf-proxy" in registered_paths
+    assert "/datasets/mix" in registered_paths
+
+
+def test_datasets_catalog_routes_to_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    expected = DatasetCatalogResponse(
+        datasets=[
+            DatasetCatalogItem(
+                id="/tmp/urdf-studio-teleop-replays/demo",
+                name="demo",
+                source="studio_export",
+                path="/tmp/urdf-studio-teleop-replays/demo",
+            )
+        ],
+        roots=["/tmp/urdf-studio-teleop-replays"],
+    )
+    monkeypatch.setattr(datasets_api, "list_dataset_catalog", lambda: expected)
+
+    result = datasets_api.datasets_catalog()
+
+    assert result.datasets[0].source == "studio_export"
+    assert result.datasets[0].path == "/tmp/urdf-studio-teleop-replays/demo"
 
 
 def test_analyze_dataset_treatments_returns_manifest(

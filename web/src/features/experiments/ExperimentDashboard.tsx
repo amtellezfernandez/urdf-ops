@@ -2,8 +2,9 @@
  * ExperimentDashboard - Main dashboard page with tabs for experiments
  */
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { FlaskConical, BarChart2, Database, Play } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/shared/ui/tabs";
 import { Button } from "@/shared/ui/button";
@@ -11,8 +12,11 @@ import { cn } from "@/shared/lib/utils";
 
 import { JobList } from "./JobList";
 import { JobDetails } from "./JobDetails";
-import { useExperimentStore, selectHasActiveJobs, selectRunningJobs } from "./useExperimentStore";
+import { DatasetCatalog } from "./DatasetCatalog";
+import { getRunningExperimentJobs, selectHasActiveJobs, useExperimentStore } from "./useExperimentStore";
 import { TrainingDialog, useTrainingStore } from "@/features/training";
+import { fetchTrainingJobs } from "./trainingJobsApi";
+import { JOB_LIST_PARAMS } from "./jobListParams";
 import {
   EXPERIMENT_DASHBOARD_CLASS_NAMES,
   EXPERIMENT_DASHBOARD_PARAMS,
@@ -65,8 +69,9 @@ function StatsCard({ title, value, subtitle, icon, trend }: StatsCardProps) {
 // ============================================================================
 
 function OverviewTab() {
-  const { jobs, total } = useExperimentStore();
-  const runningJobs = useExperimentStore(selectRunningJobs);
+  const jobs = useExperimentStore((state) => state.jobs);
+  const total = useExperimentStore((state) => state.total);
+  const runningJobs = useMemo(() => getRunningExperimentJobs(jobs), [jobs]);
 
   const completedJobs = jobs.filter((j) => j.status === "completed").length;
   const failedJobs = jobs.filter((j) => j.status === "failed").length;
@@ -141,7 +146,7 @@ function OverviewTab() {
 // ============================================================================
 
 function JobsTab() {
-  const { selectedJobId } = useExperimentStore();
+  const selectedJobId = useExperimentStore((state) => state.selectedJobId);
 
   return (
     <div className={EXPERIMENT_DASHBOARD_CLASS_NAMES.splitView}>
@@ -171,9 +176,41 @@ function JobsTab() {
 // ============================================================================
 
 export function ExperimentDashboard() {
-  const { reset } = useExperimentStore();
+  const reset = useExperimentStore((state) => state.reset);
   const hasActiveJobs = useExperimentStore(selectHasActiveJobs);
+  const page = useExperimentStore((state) => state.page);
+  const pageSize = useExperimentStore((state) => state.pageSize);
+  const setJobs = useExperimentStore((state) => state.setJobs);
+  const setIsLoading = useExperimentStore((state) => state.setIsLoading);
+  const setError = useExperimentStore((state) => state.setError);
   const openTrainingDialog = useTrainingStore((state) => state.openDialog);
+  const {
+    data: jobsData,
+    error: jobsError,
+    isFetching: isJobsFetching,
+  } = useQuery({
+    queryKey: ["jobs", page, pageSize],
+    queryFn: () => fetchTrainingJobs(page, pageSize),
+    staleTime: JOB_LIST_PARAMS.queryStaleTimeMs,
+  });
+
+  useEffect(() => {
+    if (jobsData) {
+      setJobs(jobsData.jobs, jobsData.total);
+    }
+  }, [jobsData, setJobs]);
+
+  useEffect(() => {
+    setIsLoading(isJobsFetching);
+  }, [isJobsFetching, setIsLoading]);
+
+  useEffect(() => {
+    if (!jobsError) {
+      setError(null);
+      return;
+    }
+    setError(jobsError instanceof Error ? jobsError.message : "Failed to fetch jobs");
+  }, [jobsError, setError]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -203,8 +240,9 @@ export function ExperimentDashboard() {
 
       {/* Content */}
       <div className={EXPERIMENT_DASHBOARD_CLASS_NAMES.content}>
-        <Tabs defaultValue="jobs" className="h-full flex flex-col">
+        <Tabs defaultValue="datasets" className="h-full flex flex-col">
           <TabsList className={EXPERIMENT_DASHBOARD_CLASS_NAMES.tabsList}>
+            <TabsTrigger value="datasets" className={EXPERIMENT_DASHBOARD_CLASS_NAMES.tabTrigger}>Datasets</TabsTrigger>
             <TabsTrigger value="overview" className={EXPERIMENT_DASHBOARD_CLASS_NAMES.tabTrigger}>Overview</TabsTrigger>
             <TabsTrigger value="jobs" className={EXPERIMENT_DASHBOARD_CLASS_NAMES.tabTrigger}>
               Jobs
@@ -213,6 +251,10 @@ export function ExperimentDashboard() {
               )}
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="datasets" className="flex-1 overflow-auto">
+            <DatasetCatalog />
+          </TabsContent>
 
           <TabsContent value="overview" className="flex-1 overflow-auto">
             <OverviewTab />
