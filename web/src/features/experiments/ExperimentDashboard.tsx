@@ -259,7 +259,7 @@ export function ExperimentDashboard({
         </div>
         <Button onClick={openTrainingDialog} className={EXPERIMENT_DASHBOARD_CLASS_NAMES.actionButton}>
           <Play className="mr-1.5 h-3.5 w-3.5" />
-          New Training
+          New training
         </Button>
       </div>
 

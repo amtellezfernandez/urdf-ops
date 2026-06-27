@@ -8,7 +8,9 @@ export const EXPERIMENT_DASHBOARD_CLASS_NAMES = {
   title: "text-base font-semibold tracking-normal",
   subtitle: "text-xs text-muted-foreground",
   actionButton:
-    "h-7 rounded-md border border-border/60 bg-background/70 px-3 text-xs text-foreground hover:bg-muted/30",
+    "h-8 rounded-md bg-foreground px-3 text-xs text-background shadow-sm hover:bg-foreground/90",
+  trainButton:
+    "h-8 rounded-md bg-foreground px-3 text-xs text-background shadow-sm hover:bg-foreground/90",
   content: "flex-1 overflow-hidden p-5",
   tabsList: "mb-4 h-8 rounded-md bg-muted/20 p-1",
   tabTrigger:

@@ -116,9 +116,13 @@ function DatasetRow({ dataset, onTrain }: DatasetRowProps) {
         <span className="text-xs text-muted-foreground md:hidden">
           {formatDate(dataset.created_at)}
         </span>
-        <Button size="sm" className="h-7 text-xs" onClick={() => onTrain(dataset)}>
+        <Button
+          size="sm"
+          className={cn(EXPERIMENT_DASHBOARD_CLASS_NAMES.trainButton, "min-w-28")}
+          onClick={() => onTrain(dataset)}
+        >
           <Play className="mr-1.5 h-3.5 w-3.5" />
-          Train
+          Train model
         </Button>
       </div>
     </div>
@@ -151,9 +155,13 @@ function InitialDatasetCard({ dataset, onTrain }: InitialDatasetCardProps) {
             {datasetValue}
           </p>
         </div>
-        <Button size="sm" className="h-7 text-xs md:self-end" onClick={onTrain}>
+        <Button
+          size="sm"
+          className={cn(EXPERIMENT_DASHBOARD_CLASS_NAMES.trainButton, "min-w-28 md:self-end")}
+          onClick={onTrain}
+        >
           <Play className="mr-1.5 h-3.5 w-3.5" />
-          Train
+          Train model
         </Button>
       </div>
     </div>
