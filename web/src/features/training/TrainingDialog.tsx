@@ -21,6 +21,7 @@ import { TRAINING_COMPUTE_PARAMS } from "./trainingComputeParams";
 import { getConfiguredComputeBackendBlockReason } from "./trainingComputePolicy";
 import type { TrainingStartResponse, TrainingStatusResponse } from "./types";
 import { fetchTrainingRuntimeCheck } from "./trainingApi";
+import { buildTrainingPayload } from "./buildTrainingPayload";
 
 const STEP_TITLES = {
   dataset: "Select Dataset",
@@ -114,65 +115,20 @@ export function TrainingDialog() {
         throw new Error(computeBlockReason);
       }
 
-      const runtimeCheck = await fetchTrainingRuntimeCheck();
-      if (!runtimeCheck.available) {
-        throw new Error(runtimeCheck.message);
+      if (computeConfig.type === "local") {
+        const runtimeCheck = await fetchTrainingRuntimeCheck();
+        if (!runtimeCheck.available) {
+          throw new Error(runtimeCheck.message);
+        }
       }
 
-      // Convert to API format (camelCase -> snake_case handled by backend)
-      const request = {
-        dataset: {
-          source: datasetConfig.source,
-          repo_id: datasetConfig.repoId,
-          local_path: datasetConfig.localPath,
-          version: datasetConfig.version,
-        },
-        model: {
-          architecture: modelConfig.architecture,
-          config: modelConfig.config,
-          pretrained_path: modelConfig.pretrainedPath,
-        },
-        training: {
-          batch_size: trainingParams.batchSize,
-          learning_rate: trainingParams.learningRate,
-          epochs: trainingParams.epochs,
-          max_steps: trainingParams.maxSteps,
-          seed: trainingParams.seed,
-          gradient_accumulation_steps: trainingParams.gradientAccumulationSteps,
-          max_grad_norm: trainingParams.maxGradNorm,
-          weight_decay: trainingParams.weightDecay,
-          lr_scheduler: trainingParams.lrScheduler,
-          warmup_steps: trainingParams.warmupSteps,
-          checkpoint_interval: trainingParams.checkpointInterval,
-          keep_last_n_checkpoints: trainingParams.keepLastNCheckpoints,
-          early_stopping_patience: trainingParams.earlyStoppingPatience,
-          output_dir: trainingParams.outputDir,
-          run_name: trainingParams.runName,
-        },
-        tracker: {
-          type: trackerConfig.type,
-          tracking_uri: trackerConfig.trackingUri,
-          experiment_name: trackerConfig.experimentName,
-          project: trackerConfig.project,
-          entity: trackerConfig.entity,
-        },
-        compute: {
-          type: computeConfig.type,
-          gpu: computeConfig.gpu,
-          device: computeConfig.device,
-          api_key: computeConfig.apiKey,
-          use_spot: computeConfig.useSpot,
-          timeout_hours: computeConfig.timeoutHours,
-          ssh_host: computeConfig.sshHost,
-          ssh_user: computeConfig.sshUser,
-          ssh_port: computeConfig.sshPort || 22,
-          ssh_key_path: computeConfig.sshKeyPath,
-          remote_output_dir: computeConfig.remoteOutputDir || "/tmp/robotops-outputs",
-          docker_image: computeConfig.dockerImage || "urdf-ops:training",
-          docker_args: computeConfig.dockerArgs,
-          ssh_options: computeConfig.sshOptions,
-        },
-      };
+      const request = buildTrainingPayload({
+        datasetConfig,
+        modelConfig,
+        trainingParams,
+        trackerConfig,
+        computeConfig,
+      });
 
       const response = await fetch(`${API_BASE_URL}/training/start`, {
         method: "POST",

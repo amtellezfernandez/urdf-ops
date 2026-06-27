@@ -24,6 +24,7 @@ from backend.models.training import (
     TrainingCancelRequest,
     TrainingComputeBackendsResponse,
     TrainingJobsListResponse,
+    TrainingPreflightResponse,
     TrainingRuntimeCheckResponse,
     TrainingStartRequest,
     TrainingStartResponse,
@@ -58,6 +59,12 @@ async def start_training(request: TrainingStartRequest) -> TrainingStartResponse
     to monitor progress.
     """
     return await training_service.start_training(request)
+
+
+@router.post("/preflight", response_model=TrainingPreflightResponse)
+async def preflight_training(request: TrainingStartRequest) -> TrainingPreflightResponse:
+    """Validate a training launch before starting it."""
+    return await training_service.preflight_training(request)
 
 
 @router.get("/status/{job_id}", response_model=TrainingStatusResponse)
@@ -173,6 +180,12 @@ async def get_training_metrics(job_id: str) -> dict:
         "lastStep": step,
         "lastEpoch": epoch,
     }
+
+
+@router.get("/artifacts/{job_id}")
+async def get_training_artifacts(job_id: str) -> dict:
+    """List artifacts produced by a training job."""
+    return await training_service.get_job_artifacts(job_id)
 
 
 # ============================================================================

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import backend.services.training as training_service
 import backend.api.training as training_api
 from backend.models.training import (
     JobStatus,
@@ -17,8 +18,10 @@ from backend.services.training import (
     _dump_internal_model,
     check_training_runtime,
     get_model_info,
+    get_job_artifacts,
     list_models,
     list_training_compute_backends,
+    preflight_training,
     start_training,
     validate_training_compute_backend,
 )
@@ -160,8 +163,10 @@ def test_training_router_is_registered_on_backend_app() -> None:
 
     assert "/training/models" in registered_paths
     assert "/training/start" in registered_paths
+    assert "/training/preflight" in registered_paths
     assert "/training/logs/{job_id}" in registered_paths
     assert "/training/metrics/{job_id}" in registered_paths
+    assert "/training/artifacts/{job_id}" in registered_paths
     assert "/training/runtime-check" in registered_paths
     assert "/training/compute/backends" in registered_paths
 
@@ -219,6 +224,38 @@ def test_training_compute_validation_requires_ssh_target() -> None:
     assert validate_training_compute_backend(request.compute) == "Remote Docker training requires an SSH host and user."
 
 
+def test_training_preflight_blocks_disabled_cloud_backend() -> None:
+    request = TrainingStartRequest.model_validate(
+        {
+            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "model": {"architecture": ModelArchitecture.ACT.value},
+            "compute": {"type": "runpod", "apiKey": "secret"},
+        }
+    )
+
+    result = asyncio.run(preflight_training(request))
+
+    assert result.ready is False
+    assert result.compute_backend == "runpod"
+    assert result.checks[0].status == "fail"
+
+
+def test_training_preflight_reports_missing_ssh_target_without_network() -> None:
+    request = TrainingStartRequest.model_validate(
+        {
+            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "model": {"architecture": ModelArchitecture.ACT.value},
+            "compute": {"type": "ssh", "sshUser": "ubuntu"},
+        }
+    )
+
+    result = asyncio.run(preflight_training(request))
+
+    assert result.ready is False
+    assert result.compute_backend == "ssh"
+    assert result.checks[0].name == "ssh_config"
+
+
 def test_training_launch_contract_maps_ssh_compute_config() -> None:
     request = TrainingStartRequest.model_validate(
         {
@@ -253,6 +290,30 @@ def test_training_launch_contract_maps_ssh_compute_config() -> None:
     assert contract.compute_config["docker_image"] == "urdf-ops:training"
     assert contract.compute_config["docker_args"] == "--shm-size 8g"
     assert contract.compute_config["use_gpu"] is True
+
+
+def test_training_artifacts_list_uses_compute_backend(tmp_path: Path) -> None:
+    compute_job_id = "local_artifacts"
+    job_dir = tmp_path / compute_job_id
+    job_dir.mkdir()
+    artifact_path = job_dir / "final_model.safetensors"
+    artifact_path.write_text("model")
+
+    training_service._jobs[TEST_JOB_ID] = {
+        "compute_job_id": compute_job_id,
+        "compute_backend": "local",
+        "output_dir": str(tmp_path),
+        "status": JobStatus.COMPLETED,
+    }
+
+    try:
+        result = asyncio.run(get_job_artifacts(TEST_JOB_ID))
+    finally:
+        training_service._jobs.pop(TEST_JOB_ID, None)
+
+    assert result["jobId"] == TEST_JOB_ID
+    assert result["total"] == 1
+    assert result["artifacts"][0]["name"] == "final_model.safetensors"
 
 
 def test_training_launch_contract_rejects_missing_dataset_repo() -> None:

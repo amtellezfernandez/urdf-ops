@@ -201,6 +201,24 @@ export interface TrainingComputeBackendsResponse {
   backends: TrainingComputeBackendCapability[];
 }
 
+export interface TrainingPreflightCheck {
+  name: string;
+  label: string;
+  status: "pass" | "warn" | "fail";
+  message: string;
+  details: Record<string, unknown>;
+}
+
+export interface TrainingPreflightResponse {
+  computeBackend: string;
+  device: string;
+  ready: boolean;
+  canTrainLocally: boolean;
+  cloudRequired: boolean;
+  recommendation: string;
+  checks: TrainingPreflightCheck[];
+}
+
 // ============================================================================
 // Model Architecture Info
 // ============================================================================

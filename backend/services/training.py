@@ -12,6 +12,8 @@ import hashlib
 import json
 import logging
 import os
+import shlex
+import subprocess
 import uuid
 from datetime import datetime
 from numbers import Real
@@ -37,6 +39,8 @@ from backend.models.training import (
     TrainingLineage,
     TrainingMetrics,
     TrainingParams,
+    TrainingPreflightCheck,
+    TrainingPreflightResponse,
     TrainingProgress,
     TrainingRuntimeCheckResponse,
     TrainingRuntimeDependencyStatus,
@@ -468,6 +472,358 @@ async def list_training_compute_instances() -> Dict[str, list]:
     return instances
 
 
+def _preflight_check(
+    name: str,
+    label: str,
+    status: str,
+    message: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> TrainingPreflightCheck:
+    return TrainingPreflightCheck(
+        name=name,
+        label=label,
+        status=status,
+        message=message,
+        details=details or {},
+    )
+
+
+def _ssh_command_parts(request: TrainingStartRequest) -> list[str]:
+    parts = [
+        "ssh",
+        "-F",
+        "/dev/null",
+        "-p",
+        str(request.compute.ssh_port),
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+    ]
+    if request.compute.ssh_key_path:
+        parts.extend(["-i", str(Path(request.compute.ssh_key_path).expanduser())])
+        parts.extend(["-o", "IdentitiesOnly=yes"])
+    if request.compute.ssh_options:
+        parts.extend(shlex.split(request.compute.ssh_options))
+    parts.append(f"{request.compute.ssh_user}@{request.compute.ssh_host}")
+    return parts
+
+
+def _run_ssh_preflight(
+    request: TrainingStartRequest,
+    command: str,
+    timeout: int = 30,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [*_ssh_command_parts(request), command],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def _preflight_ssh_training(request: TrainingStartRequest) -> TrainingPreflightResponse:
+    device = request.compute.device
+    checks: list[TrainingPreflightCheck] = []
+
+    if not request.compute.ssh_host or not request.compute.ssh_user:
+        checks.append(
+            _preflight_check(
+                "ssh_config",
+                "Remote machine",
+                "fail",
+                "SSH host and user are required for remote Docker training.",
+            )
+        )
+        return TrainingPreflightResponse(
+            compute_backend="ssh",
+            device=device,
+            ready=False,
+            can_train_locally=False,
+            cloud_required=True,
+            recommendation="Enter the SSH host and user for an existing Docker machine.",
+            checks=checks,
+        )
+
+    try:
+        result = _run_ssh_preflight(request, "echo robotops-ssh-ok", timeout=15)
+        checks.append(
+            _preflight_check(
+                "ssh",
+                "SSH access",
+                "pass" if result.returncode == 0 else "fail",
+                "SSH connection succeeded."
+                if result.returncode == 0
+                else result.stderr.strip() or "SSH connection failed.",
+                {
+                    "host": request.compute.ssh_host,
+                    "user": request.compute.ssh_user,
+                    "port": request.compute.ssh_port,
+                },
+            )
+        )
+    except Exception as exc:
+        checks.append(_preflight_check("ssh", "SSH access", "fail", f"SSH check failed: {exc}"))
+
+    try:
+        result = _run_ssh_preflight(request, "docker info --format '{{.DockerRootDir}}'", timeout=20)
+        checks.append(
+            _preflight_check(
+                "docker",
+                "Remote Docker",
+                "pass" if result.returncode == 0 else "fail",
+                f"Docker daemon reachable. Root: {result.stdout.strip()}"
+                if result.returncode == 0
+                else result.stderr.strip() or "Docker daemon is not reachable.",
+            )
+        )
+    except Exception as exc:
+        checks.append(_preflight_check("docker", "Remote Docker", "fail", f"Docker check failed: {exc}"))
+
+    docker_image = request.compute.docker_image
+    quoted_image = shlex.quote(docker_image)
+    try:
+        result = _run_ssh_preflight(request, f"docker image inspect {quoted_image} >/dev/null", timeout=30)
+        checks.append(
+            _preflight_check(
+                "trainer_image",
+                "Trainer image",
+                "pass" if result.returncode == 0 else "fail",
+                f"Trainer image is available: {docker_image}"
+                if result.returncode == 0
+                else f"Trainer image is missing on the remote machine: {docker_image}",
+                {"image": docker_image},
+            )
+        )
+    except Exception as exc:
+        checks.append(
+            _preflight_check(
+                "trainer_image",
+                "Trainer image",
+                "fail",
+                f"Image check failed: {exc}",
+                {"image": docker_image},
+            )
+        )
+
+    remote_output_dir = request.compute.remote_output_dir
+    quoted_output = shlex.quote(remote_output_dir)
+    try:
+        result = _run_ssh_preflight(
+            request,
+            f"mkdir -p {quoted_output} && df -Pk {quoted_output} | awk 'NR==2 {{print $4\" \"$2}}'",
+            timeout=20,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            free_kb, total_kb = [int(value) for value in result.stdout.strip().split()[:2]]
+            free_gb = round(free_kb / (1024**2), 2)
+            total_gb = round(total_kb / (1024**2), 2)
+            status = "pass" if free_gb >= 20 else "warn" if free_gb >= 5 else "fail"
+            checks.append(
+                _preflight_check(
+                    "remote_storage",
+                    "Remote artifact storage",
+                    status,
+                    f"{free_gb} GB free at {remote_output_dir}.",
+                    {"free_gb": free_gb, "total_gb": total_gb, "path": remote_output_dir},
+                )
+            )
+        else:
+            checks.append(
+                _preflight_check(
+                    "remote_storage",
+                    "Remote artifact storage",
+                    "fail",
+                    result.stderr.strip() or "Could not inspect remote disk.",
+                )
+            )
+    except Exception as exc:
+        checks.append(
+            _preflight_check(
+                "remote_storage",
+                "Remote artifact storage",
+                "fail",
+                f"Remote storage check failed: {exc}",
+            )
+        )
+
+    if device == "cuda":
+        gpu_command = (
+            f"docker run --rm --gpus all {quoted_image} "
+            "python3 -c 'import torch; print(int(torch.cuda.is_available()))'"
+        )
+        try:
+            result = _run_ssh_preflight(request, gpu_command, timeout=120)
+            gpu_ready = result.returncode == 0 and result.stdout.strip().splitlines()[-1:] == ["1"]
+            checks.append(
+                _preflight_check(
+                    "remote_gpu",
+                    "Remote GPU",
+                    "pass" if gpu_ready else "fail",
+                    "CUDA is visible inside the trainer container."
+                    if gpu_ready
+                    else result.stderr.strip() or result.stdout.strip() or "CUDA is not visible inside the trainer container.",
+                )
+            )
+        except Exception as exc:
+            checks.append(_preflight_check("remote_gpu", "Remote GPU", "fail", f"GPU check failed: {exc}"))
+    else:
+        checks.append(_preflight_check("remote_gpu", "Remote GPU", "warn", f"Remote training will use device '{device}'."))
+
+    dataset_source = _get_enum_value(request.dataset.source)
+    if dataset_source == "local":
+        local_path = request.dataset.local_path or ""
+        try:
+            result = _run_ssh_preflight(request, f"test -e {shlex.quote(local_path)}", timeout=15)
+            checks.append(
+                _preflight_check(
+                    "dataset",
+                    "Dataset",
+                    "pass" if result.returncode == 0 else "fail",
+                    "Local dataset path exists on the remote machine."
+                    if result.returncode == 0
+                    else "Local dataset path does not exist on the remote machine.",
+                    {"local_path": local_path},
+                )
+            )
+        except Exception as exc:
+            checks.append(_preflight_check("dataset", "Dataset", "fail", f"Remote dataset check failed: {exc}"))
+    elif request.dataset.repo_id:
+        checks.append(
+            _preflight_check(
+                "dataset",
+                "Dataset",
+                "pass",
+                f"Remote trainer will download Hugging Face dataset: {request.dataset.repo_id}",
+            )
+        )
+    else:
+        checks.append(_preflight_check("dataset", "Dataset", "fail", "Hugging Face dataset source requires a repo ID."))
+
+    tracker_type = _get_enum_value(request.tracker.type)
+    checks.append(
+        _preflight_check(
+            "tracker",
+            "Experiment tracker",
+            "warn" if tracker_type in {"mlflow", "wandb"} else "pass",
+            "Ensure tracker credentials are available to the remote container."
+            if tracker_type in {"mlflow", "wandb"}
+            else "Tracker disabled; metrics and artifacts remain local to URDF Ops.",
+        )
+    )
+
+    has_failures = any(check.status == "fail" for check in checks)
+    return TrainingPreflightResponse(
+        compute_backend="ssh",
+        device=device,
+        ready=not has_failures,
+        can_train_locally=False,
+        cloud_required=True,
+        recommendation=(
+            "Ready to launch on the remote Docker machine."
+            if not has_failures
+            else "Fix failed remote checks before launching remote training."
+        ),
+        checks=checks,
+    )
+
+
+async def preflight_training(request: TrainingStartRequest) -> TrainingPreflightResponse:
+    """Validate whether the selected training configuration can be launched."""
+    compute_backend = _get_enum_value(request.compute.type)
+    device = request.compute.device
+    checks: list[TrainingPreflightCheck] = []
+
+    if compute_backend == "ssh":
+        return _preflight_ssh_training(request)
+
+    compute_block_reason = validate_training_compute_backend(request.compute)
+    if compute_block_reason:
+        checks.append(
+            _preflight_check(
+                "compute_backend",
+                "Compute backend",
+                "fail",
+                compute_block_reason,
+                {"requested_backend": compute_backend},
+            )
+        )
+        return TrainingPreflightResponse(
+            compute_backend=compute_backend,
+            device=device,
+            ready=False,
+            can_train_locally=False,
+            cloud_required=True,
+            recommendation="Use local training or configure a remote Docker machine.",
+            checks=checks,
+        )
+
+    try:
+        launch_contract = build_training_launch_contract(
+            request,
+            job_id=f"preflight_{uuid.uuid4().hex[:8]}",
+            lerobot_python_path=_resolve_lerobot_python_path(),
+        )
+        checks.append(
+            _preflight_check(
+                "launch_contract",
+                "Launch contract",
+                "pass",
+                "Dataset, output directory, model, and tracker configuration are valid.",
+                {"output_dir": str(launch_contract.output_dir)},
+            )
+        )
+    except ValueError as exc:
+        checks.append(_preflight_check("launch_contract", "Launch contract", "fail", str(exc)))
+
+    runtime_check = check_training_runtime()
+    missing_required = [
+        dependency.name
+        for dependency in runtime_check.dependencies
+        if dependency.required and not dependency.installed
+    ]
+    checks.append(
+        _preflight_check(
+            "runtime",
+            "Local runtime",
+            "pass" if runtime_check.available else "fail",
+            runtime_check.message,
+            {
+                "python_executable": runtime_check.python_executable,
+                "missing_required": missing_required,
+                "cuda_available": runtime_check.cuda_available,
+            },
+        )
+    )
+    if device == "cuda" and runtime_check.cuda_available is False:
+        checks.append(
+            _preflight_check(
+                "device",
+                "CUDA device",
+                "warn",
+                "The selected device is CUDA, but torch does not report CUDA availability on this backend.",
+            )
+        )
+    else:
+        checks.append(_preflight_check("device", "Training device", "pass", f"Selected device: {device}"))
+
+    has_failures = any(check.status == "fail" for check in checks)
+    return TrainingPreflightResponse(
+        compute_backend=compute_backend,
+        device=device,
+        ready=not has_failures,
+        can_train_locally=runtime_check.available,
+        cloud_required=False,
+        recommendation=(
+            "Ready to launch local training."
+            if not has_failures
+            else "Fix failed preflight checks before launching training."
+        ),
+        checks=checks,
+    )
+
+
 def _create_lineage(
     request: TrainingStartRequest,
     started_at: str,
@@ -771,6 +1127,39 @@ async def get_training_status(job_id: str) -> TrainingStatusResponse:
             error=str(e),
             compute_backend=job_info.get("compute_backend", "unknown"),
         )
+
+
+async def get_job_artifacts(job_id: str) -> dict:
+    """List artifacts produced by a training job through its compute backend."""
+    await _ensure_jobs_loaded()
+    if job_id not in _jobs:
+        await _load_job_from_store(job_id)
+    if job_id not in _jobs:
+        return {"jobId": job_id, "artifacts": [], "total": 0}
+
+    job_info = _jobs[job_id]
+    compute_job_id = job_info.get("compute_job_id")
+    if not compute_job_id:
+        return {"jobId": job_id, "artifacts": [], "total": 0}
+
+    try:
+        compute = get_compute(_job_compute_config(job_info))
+        artifacts = await compute.list_artifacts(compute_job_id)
+    except Exception as exc:
+        logger.warning(f"Failed to list artifacts for {job_id}: {exc}")
+        return {"jobId": job_id, "artifacts": [], "total": 0, "error": str(exc)}
+
+    payload = [
+        {
+            "name": artifact.name,
+            "path": artifact.path,
+            "sizeBytes": artifact.size_bytes,
+            "artifactType": artifact.artifact_type,
+            "createdAt": artifact.created_at,
+        }
+        for artifact in artifacts
+    ]
+    return {"jobId": job_id, "artifacts": payload, "total": len(payload)}
 
 
 async def cancel_training(job_id: str, reason: Optional[str] = None) -> bool:

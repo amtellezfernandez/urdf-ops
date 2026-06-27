@@ -18,6 +18,7 @@ import {
   Terminal,
   BarChart2,
   Info,
+  FileText,
 } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -31,6 +32,21 @@ import { cn } from "@/shared/lib/utils";
 
 import { useExperimentStore } from "./useExperimentStore";
 import type { TrainingJob, JobStatus } from "./types";
+
+interface TrainingArtifact {
+  name: string;
+  path: string;
+  sizeBytes: number;
+  artifactType: string;
+  createdAt?: string;
+}
+
+interface TrainingArtifactsResponse {
+  jobId: string;
+  artifacts: TrainingArtifact[];
+  total: number;
+  error?: string;
+}
 
 // ============================================================================
 // Status Configuration
@@ -275,6 +291,85 @@ function LogsSection({ job }: { job: TrainingJob }) {
 }
 
 // ============================================================================
+// Artifacts Section
+// ============================================================================
+
+function formatBytes(sizeBytes: number): string {
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`;
+  }
+  if (sizeBytes < 1024 * 1024) {
+    return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ArtifactsSection({ job }: { job: TrainingJob }) {
+  const { data, isFetching, refetch } = useQuery<TrainingArtifactsResponse>({
+    queryKey: ["job-artifacts", job.id],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/training/artifacts/${job.id}`);
+      if (!response.ok) throw new Error("Failed to fetch artifacts");
+      return response.json();
+    },
+    refetchInterval: job.status === "running" ? 5000 : false,
+  });
+
+  const artifacts = data?.artifacts || [];
+
+  if (!artifacts.length) {
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-center">
+        <FileText className="h-8 w-8 text-muted-foreground mb-2" />
+        <p className="text-sm text-muted-foreground">
+          Artifacts will appear here after checkpoints, logs, or final models are written.
+        </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mt-3"
+          onClick={() => refetch()}
+          disabled={isFetching}
+        >
+          <RefreshCw className={cn("mr-2 h-4 w-4", isFetching && "animate-spin")} />
+          Refresh
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-muted-foreground">{data?.total || artifacts.length} files</div>
+        <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isFetching}>
+          <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
+        </Button>
+      </div>
+      <div className="space-y-2">
+        {artifacts.map((artifact) => (
+          <div key={artifact.path} className="rounded-lg border p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">{artifact.name}</div>
+                <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                  {artifact.path}
+                </div>
+              </div>
+              <Badge variant="outline">{artifact.artifactType}</Badge>
+            </div>
+            <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
+              <span>{formatBytes(artifact.sizeBytes)}</span>
+              {artifact.createdAt ? <span>{new Date(artifact.createdAt).toLocaleString()}</span> : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // Main Component
 // ============================================================================
 
@@ -380,6 +475,7 @@ export function JobDetails() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="metrics">Metrics</TabsTrigger>
           <TabsTrigger value="logs">Logs</TabsTrigger>
+          <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="flex-1 overflow-auto p-4 space-y-6">
@@ -429,6 +525,10 @@ export function JobDetails() {
 
         <TabsContent value="logs" className="flex-1 overflow-hidden p-4">
           <LogsSection job={selectedJob} />
+        </TabsContent>
+
+        <TabsContent value="artifacts" className="flex-1 overflow-auto p-4">
+          <ArtifactsSection job={selectedJob} />
         </TabsContent>
       </Tabs>
     </div>
