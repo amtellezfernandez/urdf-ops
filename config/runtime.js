@@ -32,18 +32,28 @@ const getConfigValue = (config, pathParts, fallback) => {
   return current ?? fallback;
 };
 
-const readNumber = (envKey, fallback) => {
-  const raw = process.env[envKey];
-  if (raw === undefined) {
-    return fallback;
+const readNumber = (envKeys, fallback) => {
+  const keys = Array.isArray(envKeys) ? envKeys : [envKeys];
+  for (const envKey of keys) {
+    const raw = process.env[envKey];
+    if (raw === undefined) {
+      continue;
+    }
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return fallback;
 };
 
-const readString = (envKey, fallback) => {
-  const raw = process.env[envKey];
-  return raw && raw.length > 0 ? raw : fallback;
+const readString = (envKeys, fallback) => {
+  const keys = Array.isArray(envKeys) ? envKeys : [envKeys];
+  for (const envKey of keys) {
+    const raw = process.env[envKey];
+    if (raw && raw.length > 0) {
+      return raw;
+    }
+  }
+  return fallback;
 };
 
 export const formatHostForUrl = (host) => {
@@ -58,17 +68,17 @@ const fileConfig = readConfigFile();
 
 export const runtimeConfig = {
   web: {
-    host: readString("URDF_WEB_HOST", getConfigValue(fileConfig, ["web", "host"], "localhost")),
-    port: readNumber("URDF_WEB_PORT", getConfigValue(fileConfig, ["web", "port"], 5173)),
-    bindHost: readString("URDF_WEB_BIND_HOST", getConfigValue(fileConfig, ["web", "bindHost"], "127.0.0.1")),
+    host: readString(["URDF_OPS_WEB_HOST", "URDF_WEB_HOST"], getConfigValue(fileConfig, ["web", "host"], "localhost")),
+    port: readNumber(["URDF_OPS_WEB_PORT", "URDF_WEB_PORT"], getConfigValue(fileConfig, ["web", "port"], 5174)),
+    bindHost: readString(["URDF_OPS_WEB_BIND_HOST", "URDF_WEB_BIND_HOST"], getConfigValue(fileConfig, ["web", "bindHost"], "127.0.0.1")),
   },
   api: {
-    host: readString("URDF_API_HOST", getConfigValue(fileConfig, ["api", "host"], "127.0.0.1")),
+    host: readString(["URDF_OPS_API_HOST", "URDF_API_HOST"], getConfigValue(fileConfig, ["api", "host"], "127.0.0.1")),
     bindHost: readString(
-      "URDF_API_BIND_HOST",
+      ["URDF_OPS_API_BIND_HOST", "URDF_API_BIND_HOST"],
       getConfigValue(fileConfig, ["api", "bindHost"], getConfigValue(fileConfig, ["api", "host"], "127.0.0.1"))
     ),
-    port: readNumber("URDF_API_PORT", getConfigValue(fileConfig, ["api", "port"], 8000)),
+    port: readNumber(["URDF_OPS_API_PORT", "URDF_API_PORT"], getConfigValue(fileConfig, ["api", "port"], 8001)),
   },
   ikd: {
     enabled: readString("URDF_IKD_ENABLED", String(getConfigValue(fileConfig, ["ikd", "enabled"], false))).toLowerCase() === "true",

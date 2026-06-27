@@ -55,7 +55,7 @@ const FALLBACK_IK: IkRuntimeConfig = {
 };
 
 const FALLBACKS: ResolvedRuntimeConfig = {
-  apiBaseUrl: "http://localhost:8000",
+  apiBaseUrl: "http://127.0.0.1:8001",
   ikdBaseUrl: "http://localhost:8088",
   ikdWsUrl: "ws://localhost:8088/telemetry",
   ikdApproachWsUrl: "ws://localhost:8088/approach/ws",
@@ -100,7 +100,7 @@ const resolveIkConfig = (config?: IkRuntimeConfig): IkRuntimeConfig => ({
 });
 
 const resolvedConfig: ResolvedRuntimeConfig = {
-  apiBaseUrl: envConfig.apiBaseUrl ?? injectedConfig.apiBaseUrl ?? FALLBACKS.apiBaseUrl,
+  apiBaseUrl: injectedConfig.apiBaseUrl ?? envConfig.apiBaseUrl ?? FALLBACKS.apiBaseUrl,
   ikdBaseUrl: envConfig.ikdBaseUrl ?? injectedConfig.ikdBaseUrl ?? FALLBACKS.ikdBaseUrl,
   ikdWsUrl: envConfig.ikdWsUrl ?? injectedConfig.ikdWsUrl ?? FALLBACKS.ikdWsUrl,
   ikdApproachWsUrl:

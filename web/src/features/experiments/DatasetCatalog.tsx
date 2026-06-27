@@ -190,6 +190,10 @@ export function DatasetCatalog({ initialDataset }: DatasetCatalogProps) {
     [datasets],
   );
   const catalogErrorMessage = error instanceof Error ? error.message : "Dataset catalog is unavailable";
+  const catalogErrorHint =
+    catalogErrorMessage.includes(":8000/") && catalogErrorMessage.includes("returned 404")
+      ? "This URDF Ops UI is pointed at the URDF Studio backend on port 8000. Restart URDF Ops from the updated repo so the UI uses the Ops backend on port 8001."
+      : "Restart the URDF Ops backend to enable local Studio export discovery.";
   const normalizedHfDatasetId = normalizeHfDatasetId(hfDatasetId);
   const initialDatasetSelected =
     initialDataset?.source === "local"
@@ -343,9 +347,8 @@ export function DatasetCatalog({ initialDataset }: DatasetCatalogProps) {
           <div className="border-b border-border/60 px-3 py-3">
             <p className="text-sm font-medium">Local catalog unavailable</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {catalogErrorMessage}. Restart the URDF Ops backend to enable local
-              Studio export discovery. Hugging Face IDs and Studio deep links can
-              still be used.
+              {catalogErrorMessage}. {catalogErrorHint} Hugging Face IDs and
+              Studio deep links can still be used.
             </p>
           </div>
         )}
@@ -358,6 +361,12 @@ export function DatasetCatalog({ initialDataset }: DatasetCatalogProps) {
             {!error && data?.roots?.length ? (
               <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
                 {data.roots.join(", ")}
+              </p>
+            ) : null}
+            {!error ? (
+              <p className="mx-auto mt-2 max-w-md text-xs text-muted-foreground">
+                Recorded Studio episodes appear here after Studio writes local
+                LeRobot exports for URDF Ops.
               </p>
             ) : null}
           </div>
