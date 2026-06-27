@@ -138,11 +138,29 @@ def _build_model_config(
 ) -> dict[str, Any]:
     model_config = dump_internal_model(request.model)
     architecture = _model_architecture(request)
-    if architecture != "dreamzero":
+    if architecture not in {"dreamzero", "lereal_world_model"}:
         return model_config
 
     raw_config = model_config.get("config", {})
     architecture_config = dict(raw_config) if isinstance(raw_config, dict) else {}
+    if architecture == "lereal_world_model":
+        if embodiment_config is not None:
+            explicit_action_schema = architecture_config.get("action_schema")
+            action_schema = (
+                explicit_action_schema
+                if isinstance(explicit_action_schema, dict)
+                else embodiment_config
+            )
+            architecture_config["action_schema"] = action_schema
+            architecture_config.setdefault("action_dim", action_schema["action_dim"])
+            architecture_config.setdefault("action_joint_names", action_schema["joint_names"])
+            architecture_config.setdefault(
+                "action_units",
+                action_schema.get("action_units", URDF_ACTION_UNITS_NATIVE),
+            )
+            model_config["config"] = architecture_config
+        return model_config
+
     explicit_action_schema = architecture_config.get("action_schema")
     if embodiment_config is None and not isinstance(explicit_action_schema, dict):
         raise ValueError(
@@ -210,7 +228,7 @@ def build_training_launch_contract(
     training_params["output_dir"] = str(output_dir)
     embodiment_config = (
         _build_embodiment_config(request)
-        if _model_architecture(request) == "dreamzero"
+        if _model_architecture(request) in {"dreamzero", "lereal_world_model"}
         else None
     )
     model_config = _build_model_config(request, embodiment_config)

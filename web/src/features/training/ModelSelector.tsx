@@ -59,6 +59,35 @@ const FALLBACK_MODELS: ModelArchitectureInfo[] = [
     recommendedFor: ["world models", "video-conditioned actions", "URDF action schemas"],
   },
   {
+    name: "lereal_world_model",
+    displayName: "LeRealWorldModel (JEPA + GC-IDM)",
+    description:
+      "Two-stage latent world-model post-training for LeRobot datasets, with optional GC-IDM planner export.",
+    defaultConfig: {
+      repo_url: "https://github.com/amtellezfernandez/LeRealWorldModel.git",
+      repo_ref: "main",
+      repo_path: "",
+      auto_install: true,
+      stage1_config: "lewm_so100_topcam",
+      stage2_config: "gc_idm_topcam",
+      run_stage2: true,
+      export_policy: true,
+      image_key: "observation.images.up",
+      image_key2: "",
+      frameskip: 5,
+      action_dim: 6,
+      stage1_epochs: 50,
+      stage2_steps: 50000,
+      goal_image_path: "",
+    },
+    configSchema: {
+      auto_install: { type: "bool" },
+      run_stage2: { type: "bool" },
+      export_policy: { type: "bool" },
+    },
+    recommendedFor: ["world-model post-training", "goal-conditioned manipulation", "image datasets"],
+  },
+  {
     name: "tdmpc",
     displayName: "TD-MPC",
     description: "Temporal Difference Model Predictive Control. Good for complex dynamics.",
@@ -188,22 +217,50 @@ export function ModelSelector() {
           </div>
 
           <div className="grid gap-3">
-            {Object.entries(selectedModel.defaultConfig).map(([key, defaultValue]) => (
-              <div key={key} className="space-y-1">
-                <Label className="text-xs">{formatConfigKey(key)}</Label>
-                <Input
-                  type={typeof defaultValue === "number" ? "number" : "text"}
-                  value={(config[key] ?? defaultValue) as string | number}
-                  onChange={(e) => {
-                    const value = typeof defaultValue === "number"
-                      ? parseFloat(e.target.value) || 0
-                      : e.target.value;
-                    handleConfigChange(key, value);
-                  }}
-                  className="h-8 text-sm"
-                />
-              </div>
-            ))}
+            {Object.entries(selectedModel.defaultConfig).map(([key, defaultValue]) => {
+              const schema = selectedModel.configSchema[key];
+              const valueType = schema?.type ?? typeof defaultValue;
+              const currentValue = config[key] ?? defaultValue;
+              const inputId = `model-config-${selectedModel.name}-${key}`;
+              if (valueType === "bool") {
+                return (
+                  <label
+                    key={key}
+                    htmlFor={inputId}
+                    className="flex h-8 items-center justify-between gap-3 rounded-md border border-border/60 bg-background/70 px-3 text-sm"
+                  >
+                    <span className="text-xs">{formatConfigKey(key)}</span>
+                    <input
+                      id={inputId}
+                      type="checkbox"
+                      checked={Boolean(currentValue)}
+                      onChange={(event) => handleConfigChange(key, event.target.checked)}
+                      className="h-4 w-4 accent-primary"
+                    />
+                  </label>
+                );
+              }
+
+              return (
+                <div key={key} className="space-y-1">
+                  <Label htmlFor={inputId} className="text-xs">{formatConfigKey(key)}</Label>
+                  <Input
+                    id={inputId}
+                    type={valueType === "int" || valueType === "float" || typeof defaultValue === "number" ? "number" : "text"}
+                    value={(currentValue ?? "") as string | number}
+                    onChange={(e) => {
+                      const value = valueType === "int"
+                        ? parseInt(e.target.value, 10) || 0
+                        : valueType === "float" || typeof defaultValue === "number"
+                          ? parseFloat(e.target.value) || 0
+                          : e.target.value;
+                      handleConfigChange(key, value);
+                    }}
+                    className="h-8 text-sm"
+                  />
+                </div>
+              );
+            })}
           </div>
 
           <p className="text-xs text-muted-foreground">

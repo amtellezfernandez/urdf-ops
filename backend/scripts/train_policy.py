@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import random
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -37,9 +38,6 @@ from typing import Any, Dict, Optional
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
-import numpy as np
-import torch
 
 from backend.services.training_policy_compat import normalize_policy_id, prepare_policy_overrides
 
@@ -74,6 +72,9 @@ def set_seed(seed: int) -> None:
     Args:
         seed: Random seed value
     """
+    import numpy as np
+    import torch
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -299,6 +300,447 @@ def train_with_dreamzero(config: Dict[str, Any], job_dir: Path) -> None:
     )
 
 
+LEREAL_WORLD_MODEL_ARCHITECTURE = "lereal_world_model"
+LEREAL_WORLD_MODEL_DEFAULT_REPO_URL = "https://github.com/amtellezfernandez/LeRealWorldModel.git"
+LEREAL_WORLD_MODEL_DEFAULT_REPO_REF = "main"
+LEREAL_WORLD_MODEL_REPO_DIRNAME = "LeRealWorldModel"
+LEREAL_WORLD_MODEL_DEFAULT_LOCAL_REPO_ID = "local/urdf-ops-dataset"
+LEREAL_WORLD_MODEL_STAGE_SETUP = "setup"
+LEREAL_WORLD_MODEL_STAGE_STAGE1 = "stage1"
+LEREAL_WORLD_MODEL_STAGE_STAGE2 = "stage2"
+LEREAL_WORLD_MODEL_STAGE_EXPORT = "export"
+LEREAL_WORLD_MODEL_STAGE_COMPLETE = "complete"
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return bool(value)
+
+
+def _as_positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1, parsed)
+
+
+def _as_optional_path_string(value: Any) -> str | None:
+    string_value = _as_optional_string(value)
+    if string_value is None:
+        return None
+    return str(Path(string_value).expanduser())
+
+
+def _lwm_write_progress(
+    job_dir: Path,
+    *,
+    stage: str,
+    current_step: int,
+    total_steps: int,
+    status: str = "running",
+    error: str | None = None,
+) -> None:
+    metrics: Dict[str, Any] = {
+        "status": status,
+        "lereal_world_model_stage": stage,
+    }
+    if error:
+        metrics["error"] = error
+    write_progress(
+        job_dir=job_dir,
+        current_epoch=current_step,
+        total_epochs=total_steps,
+        current_step=current_step,
+        total_steps=total_steps,
+        metrics=metrics,
+    )
+    append_metrics(
+        job_dir=job_dir,
+        step=current_step,
+        epoch=current_step,
+        metrics=metrics,
+    )
+
+
+def _run_lereal_world_model_command(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    env: Dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    logger.info("Running LeRealWorldModel command: %s", " ".join(cmd))
+    return subprocess.run(
+        cmd,
+        cwd=cwd,
+        env=env,
+        text=True,
+        check=False,
+    )
+
+
+def _resolve_lereal_world_model_repo(
+    runtime_config: Dict[str, Any],
+    job_dir: Path,
+    env: Dict[str, str],
+) -> Path:
+    explicit_repo_path = _as_optional_path_string(
+        runtime_config.get("repo_path") or os.environ.get("URDF_OPS_LEREALWORLDMODEL_REPO")
+    )
+    if explicit_repo_path:
+        repo_path = Path(explicit_repo_path).resolve(strict=False)
+        if not repo_path.is_dir():
+            raise RuntimeError(f"LeRealWorldModel repo_path does not exist: {repo_path}")
+        return repo_path
+
+    repo_url = (
+        _as_optional_string(runtime_config.get("repo_url"))
+        or os.environ.get("URDF_OPS_LEREALWORLDMODEL_REPO_URL")
+        or LEREAL_WORLD_MODEL_DEFAULT_REPO_URL
+    )
+    repo_ref = (
+        _as_optional_string(runtime_config.get("repo_ref"))
+        or os.environ.get("URDF_OPS_LEREALWORLDMODEL_REPO_REF")
+        or LEREAL_WORLD_MODEL_DEFAULT_REPO_REF
+    )
+    repo_path = job_dir / LEREAL_WORLD_MODEL_REPO_DIRNAME
+    if repo_path.is_dir():
+        return repo_path
+
+    cmd = [
+        "git",
+        "clone",
+        "--depth",
+        "1",
+        "--branch",
+        repo_ref,
+        repo_url,
+        str(repo_path),
+    ]
+    result = _run_lereal_world_model_command(cmd, cwd=job_dir, env=env)
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to clone LeRealWorldModel from {repo_url}@{repo_ref}")
+    return repo_path
+
+
+def _install_lereal_world_model_repo(
+    repo_path: Path,
+    *,
+    env: Dict[str, str],
+) -> None:
+    cmd = [sys.executable, "-m", "pip", "install", "-e", str(repo_path)]
+    result = _run_lereal_world_model_command(cmd, cwd=repo_path, env=env)
+    if result.returncode != 0:
+        raise RuntimeError("Failed to install LeRealWorldModel dependencies")
+
+
+def _prepare_lereal_world_model_checkout(repo_path: Path) -> None:
+    """Patch checkout layout mismatches before running the upstream project."""
+
+    legacy_package_path = repo_path / "lewm"
+    source_package_path = repo_path / "lewm_robot"
+    if not legacy_package_path.exists() and source_package_path.is_dir():
+        shutil.copytree(source_package_path, legacy_package_path)
+
+
+def _lwm_dataset_overrides(
+    config: Dict[str, Any],
+    runtime_config: Dict[str, Any],
+    *,
+    stage: str,
+) -> list[str]:
+    dataset_config = config.get("dataset", {})
+    if not isinstance(dataset_config, dict):
+        dataset_config = {}
+
+    overrides: list[str] = []
+    if stage == LEREAL_WORLD_MODEL_STAGE_STAGE1:
+        overrides.append("data.dataset._target_=lewm_robot.data.lerobot_adapter.LeRobotWMDataset")
+    source = str(dataset_config.get("source") or "huggingface")
+    if source == "local":
+        local_path = _as_optional_string(dataset_config.get("local_path"))
+        if not local_path:
+            raise ValueError("LeRealWorldModel local training requires dataset.local_path.")
+        repo_id = (
+            _as_optional_string(runtime_config.get("local_repo_id"))
+            or LEREAL_WORLD_MODEL_DEFAULT_LOCAL_REPO_ID
+        )
+        overrides.extend(
+            [
+                f"data.dataset.repo_id={repo_id}",
+                f"data.dataset.root={Path(local_path).expanduser().resolve(strict=False)}",
+            ]
+        )
+    else:
+        repo_id = _as_optional_string(dataset_config.get("repo_id"))
+        if not repo_id:
+            raise ValueError("LeRealWorldModel Hugging Face training requires dataset.repo_id.")
+        overrides.extend(
+            [
+                f"data.dataset.repo_id={repo_id}",
+                "data.dataset.root=null",
+            ]
+        )
+
+    image_key = _as_optional_string(runtime_config.get("image_key")) or "observation.images.up"
+    image_key2 = _as_optional_string(runtime_config.get("image_key2"))
+    overrides.append(f"data.dataset.image_key={image_key}")
+    if image_key2:
+        overrides.append(f"data.dataset.image_key2={image_key2}")
+        if stage == LEREAL_WORLD_MODEL_STAGE_STAGE2:
+            overrides.append(f"data.dataset.image_keys=[{image_key},{image_key2}]")
+    else:
+        overrides.append("data.dataset.image_key2=null")
+        if stage == LEREAL_WORLD_MODEL_STAGE_STAGE2:
+            overrides.append(f"data.dataset.image_keys=[{image_key}]")
+
+    if stage == LEREAL_WORLD_MODEL_STAGE_STAGE1:
+        action_key = _as_optional_string(runtime_config.get("action_key"))
+        proprio_key = _as_optional_string(runtime_config.get("proprio_key"))
+        if action_key:
+            overrides.append(f"data.dataset.action_key={action_key}")
+        if proprio_key:
+            overrides.append(f"data.dataset.proprio_key={proprio_key}")
+
+    frameskip = _as_positive_int(runtime_config.get("frameskip"), 5)
+    action_dim = _as_positive_int(runtime_config.get("action_dim"), 6)
+    overrides.extend(
+        [
+            f"data.dataset.frameskip={frameskip}",
+            f"wm.action_dim={action_dim}",
+        ]
+    )
+    if stage == LEREAL_WORLD_MODEL_STAGE_STAGE2:
+        overrides.append(f"wm.frameskip={frameskip}")
+    return overrides
+
+
+def _latest_lereal_world_model_checkpoint(repo_path: Path, output_model_name: str) -> Path:
+    checkpoint_root = repo_path / "checkpoints"
+    candidates = sorted(
+        checkpoint_root.rglob(f"{output_model_name}_epoch_*_object.ckpt"),
+        key=lambda path: path.stat().st_mtime,
+    )
+    if not candidates:
+        candidates = sorted(
+            checkpoint_root.rglob("*_epoch_*_object.ckpt"),
+            key=lambda path: path.stat().st_mtime,
+        )
+    if not candidates:
+        raise RuntimeError("LeRealWorldModel Stage 1 did not produce a *_object.ckpt checkpoint.")
+    return candidates[-1]
+
+
+def _normalizers_path_for_world_model(world_model_path: Path, output_model_name: str) -> Path:
+    expected = world_model_path.parent / f"{output_model_name}_normalizers.pt"
+    if expected.exists():
+        return expected
+    candidates = sorted(world_model_path.parent.glob("*_normalizers.pt"))
+    return candidates[-1] if candidates else expected
+
+
+def train_with_lereal_world_model(config: Dict[str, Any], job_dir: Path) -> None:
+    """Run LeRealWorldModel JEPA/GC-IDM training from an Ops training job."""
+
+    model_config = config.get("model", {})
+    runtime_config = model_config.get("config", {}) if isinstance(model_config, dict) else {}
+    if not isinstance(runtime_config, dict):
+        raise ValueError("LeRealWorldModel model config must be an object.")
+
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    total_steps = 2
+    if _as_bool(runtime_config.get("run_stage2"), True):
+        total_steps += 1
+    if _as_bool(runtime_config.get("export_policy"), True):
+        total_steps += 1
+
+    try:
+        _lwm_write_progress(
+            job_dir,
+            stage=LEREAL_WORLD_MODEL_STAGE_SETUP,
+            current_step=0,
+            total_steps=total_steps,
+        )
+        repo_path = _resolve_lereal_world_model_repo(runtime_config, job_dir, env)
+        _prepare_lereal_world_model_checkout(repo_path)
+        env["PYTHONPATH"] = (
+            f"{repo_path}{os.pathsep}{env['PYTHONPATH']}"
+            if env.get("PYTHONPATH")
+            else str(repo_path)
+        )
+        if _as_bool(runtime_config.get("auto_install"), True):
+            _install_lereal_world_model_repo(repo_path, env=env)
+
+        training_config = config.get("training", {})
+        if not isinstance(training_config, dict):
+            training_config = {}
+
+        stage1_config = _as_optional_string(runtime_config.get("stage1_config")) or "lewm_so100_topcam"
+        output_model_name = (
+            _as_optional_string(runtime_config.get("output_model_name"))
+            or stage1_config
+        )
+        run_subdir = _as_optional_string(training_config.get("run_name")) or job_dir.name
+        stage1_epochs = _as_positive_int(
+            runtime_config.get("stage1_epochs") or training_config.get("epochs"),
+            50,
+        )
+        stage1_dataset_overrides = _lwm_dataset_overrides(
+            config,
+            runtime_config,
+            stage=LEREAL_WORLD_MODEL_STAGE_STAGE1,
+        )
+        stage1_overrides = [
+            *stage1_dataset_overrides,
+            f"output_model_name={output_model_name}",
+            f"subdir={run_subdir}",
+            f"trainer.max_epochs={stage1_epochs}",
+        ]
+        if "learning_rate" in training_config:
+            stage1_overrides.append(f"optimizer.lr={training_config['learning_rate']}")
+        if "batch_size" in training_config:
+            stage1_overrides.append(f"loader.batch_size={training_config['batch_size']}")
+        runner_args = _as_string_list(runtime_config.get("stage1_overrides"))
+        stage1_overrides.extend(runner_args)
+
+        _lwm_write_progress(
+            job_dir,
+            stage=LEREAL_WORLD_MODEL_STAGE_STAGE1,
+            current_step=1,
+            total_steps=total_steps,
+        )
+        stage1_cmd = [
+            sys.executable,
+            "train_lewm.py",
+            "--config-name",
+            stage1_config,
+            *stage1_overrides,
+        ]
+        stage1_result = _run_lereal_world_model_command(stage1_cmd, cwd=repo_path, env=env)
+        if stage1_result.returncode != 0:
+            raise RuntimeError(f"LeRealWorldModel Stage 1 failed with exit code {stage1_result.returncode}")
+
+        world_model_path = _latest_lereal_world_model_checkpoint(repo_path, output_model_name)
+        normalizers_path = _normalizers_path_for_world_model(world_model_path, output_model_name)
+        current_step = 2
+        gc_idm_path: Path | None = None
+
+        if _as_bool(runtime_config.get("run_stage2"), True):
+            stage2_config = _as_optional_string(runtime_config.get("stage2_config")) or "gc_idm_topcam"
+            stage2_steps = _as_positive_int(runtime_config.get("stage2_steps"), 50000)
+            stage2_dataset_overrides = _lwm_dataset_overrides(
+                config,
+                runtime_config,
+                stage=LEREAL_WORLD_MODEL_STAGE_STAGE2,
+            )
+            stage2_overrides = [
+                *stage2_dataset_overrides,
+                f"world_model_path={world_model_path}",
+                f"steps={stage2_steps}",
+            ]
+            if "batch_size" in training_config:
+                stage2_overrides.append(f"batch_size={training_config['batch_size']}")
+            stage2_overrides.extend(_as_string_list(runtime_config.get("stage2_overrides")))
+            _lwm_write_progress(
+                job_dir,
+                stage=LEREAL_WORLD_MODEL_STAGE_STAGE2,
+                current_step=current_step,
+                total_steps=total_steps,
+            )
+            stage2_cmd = [
+                sys.executable,
+                "train_gc_idm.py",
+                "--config-name",
+                stage2_config,
+                *stage2_overrides,
+            ]
+            stage2_result = _run_lereal_world_model_command(stage2_cmd, cwd=repo_path, env=env)
+            if stage2_result.returncode != 0:
+                raise RuntimeError(f"LeRealWorldModel Stage 2 failed with exit code {stage2_result.returncode}")
+            gc_idm_path = world_model_path.parent / "gc_idm.pt"
+            current_step += 1
+
+        if _as_bool(runtime_config.get("export_policy"), True):
+            if gc_idm_path is None:
+                gc_idm_path = Path(
+                    _as_optional_string(runtime_config.get("gc_idm_path")) or world_model_path.parent / "gc_idm.pt"
+                )
+            if not gc_idm_path.exists():
+                raise RuntimeError("LeRealWorldModel export requires gc_idm.pt from Stage 2 or model.config.gc_idm_path.")
+            export_dir = job_dir / "final_model"
+            export_cmd = [
+                sys.executable,
+                "export_policy.py",
+                "--world_model_path",
+                str(world_model_path),
+                "--gc_idm_path",
+                str(gc_idm_path),
+                "--normalizers_path",
+                str(normalizers_path),
+                "--output_dir",
+                str(export_dir),
+                "--action_dim",
+                str(_as_positive_int(runtime_config.get("action_dim"), 6)),
+                "--frameskip",
+                str(_as_positive_int(runtime_config.get("frameskip"), 5)),
+            ]
+            goal_image_path = _as_optional_string(runtime_config.get("goal_image_path"))
+            if goal_image_path:
+                export_cmd.extend(["--goal_image_path", goal_image_path])
+            image_key = _as_optional_string(runtime_config.get("image_key")) or "observation.images.up"
+            image_key2 = _as_optional_string(runtime_config.get("image_key2"))
+            image_keys = [image_key, *([image_key2] if image_key2 else [])]
+            export_cmd.extend(["--image_keys", *image_keys])
+            _lwm_write_progress(
+                job_dir,
+                stage=LEREAL_WORLD_MODEL_STAGE_EXPORT,
+                current_step=current_step,
+                total_steps=total_steps,
+            )
+            export_result = _run_lereal_world_model_command(export_cmd, cwd=repo_path, env=env)
+            if export_result.returncode != 0:
+                raise RuntimeError(f"LeRealWorldModel export failed with exit code {export_result.returncode}")
+
+        summary_path = job_dir / "lereal_world_model_summary.json"
+        _write_json(
+            summary_path,
+            {
+                "repo_path": str(repo_path),
+                "world_model_path": str(world_model_path),
+                "normalizers_path": str(normalizers_path),
+                "gc_idm_path": str(gc_idm_path) if gc_idm_path else None,
+                "final_model_path": str(job_dir / "final_model"),
+            },
+        )
+        _lwm_write_progress(
+            job_dir,
+            stage=LEREAL_WORLD_MODEL_STAGE_COMPLETE,
+            current_step=total_steps,
+            total_steps=total_steps,
+            status="completed",
+        )
+    except Exception as exc:
+        _lwm_write_progress(
+            job_dir,
+            stage=LEREAL_WORLD_MODEL_STAGE_COMPLETE,
+            current_step=total_steps,
+            total_steps=total_steps,
+            status="failed",
+            error=str(exc),
+        )
+        raise
+
+
 def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
     """Train using LeRobot library.
 
@@ -315,6 +757,7 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
         RuntimeError: If training fails
     """
     logger.info("Starting LeRobot training")
+    import torch
     from torch.utils.data import DataLoader
     from lerobot.configs.default import DatasetConfig
     from lerobot.configs.train import TrainPipelineConfig
@@ -646,6 +1089,8 @@ def main() -> int:
         architecture = str(config.get("model", {}).get("architecture", "act")).replace("-", "_")
         if architecture == "dreamzero":
             train_with_dreamzero(config, job_dir)
+        elif architecture == LEREAL_WORLD_MODEL_ARCHITECTURE:
+            train_with_lereal_world_model(config, job_dir)
         else:
             train_with_lerobot(config, job_dir)
         return 0

@@ -13,6 +13,7 @@ export type ModelArchitecture =
   | "act"
   | "diffusion_policy"
   | "dreamzero"
+  | "lereal_world_model"
   | "tdmpc"
   | "vq_bet"
   | "custom";

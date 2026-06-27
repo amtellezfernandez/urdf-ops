@@ -153,9 +153,17 @@ def test_training_model_catalog_uses_lerobot_architecture_names() -> None:
     models = list_models()
     architecture_names = {model.name for model in models.models}
 
-    assert {"act", "diffusion_policy", "dreamzero", "tdmpc", "vq_bet"}.issubset(architecture_names)
+    assert {
+        "act",
+        "diffusion_policy",
+        "dreamzero",
+        "lereal_world_model",
+        "tdmpc",
+        "vq_bet",
+    }.issubset(architecture_names)
     assert get_model_info("diffusion_policy") is not None
     assert get_model_info("dreamzero") is not None
+    assert get_model_info("lereal_world_model") is not None
     assert get_model_info("vq_bet") is not None
 
 
@@ -519,6 +527,35 @@ def test_training_launch_contract_requires_dreamzero_action_schema() -> None:
             job_id=TEST_JOB_ID,
             lerobot_python_path=Path("/tmp/python"),
         )
+
+
+def test_training_launch_contract_embeds_optional_action_schema_for_lereal_world_model() -> None:
+    request = TrainingStartRequest.model_validate(
+        {
+            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "model": {"architecture": ModelArchitecture.LEREAL_WORLD_MODEL.value},
+            "urdf": TEST_SO101_URDF,
+            "robotName": "so101",
+        }
+    )
+
+    contract = build_training_launch_contract(
+        request,
+        job_id=TEST_JOB_ID,
+        lerobot_python_path=Path("/tmp/python"),
+    )
+
+    action_schema = contract.training_config["model"]["config"]["action_schema"]
+    assert action_schema["robot_name"] == "so101"
+    assert contract.training_config["model"]["config"]["action_dim"] == 6
+    assert contract.training_config["model"]["config"]["action_joint_names"] == [
+        "shoulder_pan",
+        "shoulder_lift",
+        "elbow_flex",
+        "wrist_flex",
+        "wrist_roll",
+        "gripper",
+    ]
 
 
 def test_start_training_rejects_cloud_before_job_side_effects() -> None:

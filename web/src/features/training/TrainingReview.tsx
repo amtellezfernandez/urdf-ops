@@ -91,6 +91,7 @@ export function TrainingReview() {
       act: "ACT (Action Chunking Transformer)",
       diffusion_policy: "Diffusion Policy",
       dreamzero: "DreamZero",
+      lereal_world_model: "LeRealWorldModel (JEPA + GC-IDM)",
       tdmpc: "TD-MPC",
       vq_bet: "VQ-BeT",
       custom: "Custom Model",
