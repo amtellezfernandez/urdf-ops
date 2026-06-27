@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   Database,
   ExternalLink,
@@ -38,6 +38,13 @@ interface DatasetCatalogItem {
 interface DatasetCatalogResponse {
   datasets: DatasetCatalogItem[];
   roots: string[];
+}
+
+export interface InitialExperimentDataset {
+  id: string;
+  name: string;
+  source: "huggingface" | "local";
+  author?: string;
 }
 
 const numberFormatter = new Intl.NumberFormat();
@@ -118,8 +125,48 @@ function DatasetRow({ dataset, onTrain }: DatasetRowProps) {
   );
 }
 
-export function DatasetCatalog() {
+interface InitialDatasetCardProps {
+  dataset: InitialExperimentDataset;
+  onTrain: () => void;
+}
+
+function InitialDatasetCard({ dataset, onTrain }: InitialDatasetCardProps) {
+  const datasetValue = dataset.id;
+  return (
+    <div className="rounded-md border border-sky-500/30 bg-sky-500/5 p-3">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="truncate text-sm font-medium" title={dataset.name}>
+              {dataset.name}
+            </p>
+            <Badge className="border-sky-500/30 bg-sky-500/10 text-[11px] font-normal text-sky-500">
+              Opened from Studio
+            </Badge>
+            <Badge className="border-border/60 bg-muted/30 text-[11px] font-normal text-muted-foreground">
+              {dataset.source === "local" ? "Local" : "Hugging Face"}
+            </Badge>
+          </div>
+          <p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={datasetValue}>
+            {datasetValue}
+          </p>
+        </div>
+        <Button size="sm" className="h-7 text-xs md:self-end" onClick={onTrain}>
+          <Play className="mr-1.5 h-3.5 w-3.5" />
+          Train
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+interface DatasetCatalogProps {
+  initialDataset?: InitialExperimentDataset | null;
+}
+
+export function DatasetCatalog({ initialDataset }: DatasetCatalogProps) {
   const [hfDatasetId, setHfDatasetId] = useState("");
+  const datasetConfig = useTrainingStore((state) => state.datasetConfig);
   const setDatasetConfig = useTrainingStore((state) => state.setDatasetConfig);
   const openTrainingDialog = useTrainingStore((state) => state.openDialog);
   const setTrainingStep = useTrainingStore((state) => state.setStep);
@@ -140,17 +187,52 @@ export function DatasetCatalog() {
     [datasets],
   );
   const normalizedHfDatasetId = normalizeHfDatasetId(hfDatasetId);
+  const initialDatasetSelected =
+    initialDataset?.source === "local"
+      ? datasetConfig?.source === "local" && datasetConfig.localPath === initialDataset.id
+      : datasetConfig?.source === "huggingface" && datasetConfig.repoId === initialDataset?.id;
 
   const openTrainingWithDataset = () => {
     openTrainingDialog();
     setTrainingStep("model");
   };
 
+  useEffect(() => {
+    if (!initialDataset || initialDatasetSelected) return;
+    if (initialDataset.source === "local") {
+      setDatasetConfig({
+        source: "local",
+        localPath: initialDataset.id,
+      });
+    } else {
+      setDatasetConfig({
+        source: "huggingface",
+        repoId: initialDataset.id,
+      });
+    }
+  }, [initialDataset, initialDatasetSelected, setDatasetConfig]);
+
   const handleTrainLocal = (dataset: DatasetCatalogItem) => {
     setDatasetConfig({
       source: "local",
       localPath: dataset.path,
     });
+    openTrainingWithDataset();
+  };
+
+  const handleTrainInitialDataset = () => {
+    if (!initialDataset) return;
+    if (initialDataset.source === "local") {
+      setDatasetConfig({
+        source: "local",
+        localPath: initialDataset.id,
+      });
+    } else {
+      setDatasetConfig({
+        source: "huggingface",
+        repoId: initialDataset.id,
+      });
+    }
     openTrainingWithDataset();
   };
 
@@ -222,6 +304,10 @@ export function DatasetCatalog() {
           </div>
         </form>
       </div>
+
+      {initialDataset && (
+        <InitialDatasetCard dataset={initialDataset} onTrain={handleTrainInitialDataset} />
+      )}
 
       <div className="overflow-hidden rounded-md border border-border/60 bg-background/95 shadow-sm">
         <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">

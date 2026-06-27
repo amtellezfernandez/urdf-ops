@@ -1,4 +1,4 @@
-import { useState, type ComponentType } from "react";
+import { useMemo, useState, type ComponentType } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { FlaskConical, BarChart2, Play, ChevronLeft, ArrowLeft } from "lucide-react";
 
@@ -15,6 +15,7 @@ import {
   type UrdfOpsTab,
 } from "@/shared/config/urdfOpsRoutes";
 import { URDF_OPS_PAGE_CLASS_NAMES, URDF_OPS_PAGE_PARAMS } from "./urdfOpsPageParams";
+import { buildUrdfOpsInitialDataset } from "./urdfOpsPageData";
 
 type StandaloneUrdfOpsTab = Extract<UrdfOpsTab, "experiments" | "metrics" | "evaluation">;
 
@@ -137,6 +138,10 @@ function Sidebar({
 export default function UrdfOps() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = resolveStandaloneTab(resolveUrdfOpsTab(searchParams.get(URDF_OPS_QUERY_PARAMS.tab)));
+  const initialDataset = useMemo(
+    () => buildUrdfOpsInitialDataset(searchParams),
+    [searchParams],
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const selectedJobId = useExperimentStore((state) => state.selectedJobId);
 
@@ -155,7 +160,9 @@ export default function UrdfOps() {
 
       <main className="min-w-0 flex-1 overflow-hidden bg-background">
         <div className="h-full overflow-hidden">
-          {activeTab === URDF_OPS_TABS.experiments && <ExperimentDashboard />}
+          {activeTab === URDF_OPS_TABS.experiments && (
+            <ExperimentDashboard initialDataset={initialDataset} />
+          )}
           {activeTab === URDF_OPS_TABS.metrics && (
             <div className="h-full overflow-auto p-5">
               <div className="mx-auto max-w-5xl">

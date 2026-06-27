@@ -25,6 +25,22 @@ describe("UrdfOps page data", () => {
     expect(dataset?.source).toBe("huggingface");
   });
 
+  it("hydrates a local Studio dataset path from route query params", () => {
+    const dataset = buildUrdfOpsInitialDataset(
+      new URLSearchParams(
+        "dataset=%2Ftmp%2Furdf-studio-teleop-replays%2Fpick-place-001&source=local",
+      ),
+    );
+
+    expect(dataset).toEqual({
+      id: "/tmp/urdf-studio-teleop-replays/pick-place-001",
+      name: "pick-place-001",
+      source: "local",
+      author: undefined,
+      tags: [],
+    });
+  });
+
   it("ignores empty dataset query params", () => {
     expect(buildUrdfOpsInitialDataset(new URLSearchParams("dataset=+"))).toBeNull();
   });

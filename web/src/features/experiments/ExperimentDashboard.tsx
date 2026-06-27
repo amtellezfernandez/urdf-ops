@@ -12,7 +12,7 @@ import { cn } from "@/shared/lib/utils";
 
 import { JobList } from "./JobList";
 import { JobDetails } from "./JobDetails";
-import { DatasetCatalog } from "./DatasetCatalog";
+import { DatasetCatalog, type InitialExperimentDataset } from "./DatasetCatalog";
 import { getRunningExperimentJobs, selectHasActiveJobs, useExperimentStore } from "./useExperimentStore";
 import { TrainingDialog, useTrainingStore } from "@/features/training";
 import { fetchTrainingJobs } from "./trainingJobsApi";
@@ -175,7 +175,11 @@ function JobsTab() {
 // Main Component
 // ============================================================================
 
-export function ExperimentDashboard() {
+interface ExperimentDashboardProps {
+  initialDataset?: InitialExperimentDataset | null;
+}
+
+export function ExperimentDashboard({ initialDataset = null }: ExperimentDashboardProps) {
   const reset = useExperimentStore((state) => state.reset);
   const hasActiveJobs = useExperimentStore(selectHasActiveJobs);
   const page = useExperimentStore((state) => state.page);
@@ -253,7 +257,7 @@ export function ExperimentDashboard() {
           </TabsList>
 
           <TabsContent value="datasets" className="flex-1 overflow-auto">
-            <DatasetCatalog />
+            <DatasetCatalog initialDataset={initialDataset} />
           </TabsContent>
 
           <TabsContent value="overview" className="flex-1 overflow-auto">
