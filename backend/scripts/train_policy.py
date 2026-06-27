@@ -136,6 +136,25 @@ def write_progress(
         json.dump(progress, f, indent=2)
 
 
+def append_metrics(
+    job_dir: Path,
+    step: int,
+    epoch: int,
+    metrics: Dict[str, Any],
+) -> None:
+    """Append a metrics snapshot for charting and log replay."""
+    entry = {
+        "step": step,
+        "epoch": epoch,
+        "timestamp": datetime.now().isoformat(),
+        **metrics,
+    }
+
+    metrics_file = job_dir / "metrics.jsonl"
+    with open(metrics_file, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
 def get_policy_config_class(architecture: str):
     """Get the config class for a given policy architecture."""
     architecture = normalize_policy_id(architecture)
@@ -502,6 +521,12 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
                 total_epochs=total_epochs,
                 current_step=global_step,
                 total_steps=total_steps,
+                metrics=metrics_dict,
+            )
+            append_metrics(
+                job_dir=job_dir,
+                step=global_step,
+                epoch=epoch,
                 metrics=metrics_dict,
             )
 

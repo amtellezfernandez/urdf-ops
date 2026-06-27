@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -348,6 +349,65 @@ def test_training_artifacts_list_uses_compute_backend(tmp_path: Path) -> None:
     assert result["jobId"] == TEST_JOB_ID
     assert result["total"] == 1
     assert result["artifacts"][0]["name"] == "final_model.safetensors"
+
+
+def test_training_metrics_endpoint_uses_history_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    async def noop_ensure_jobs_loaded() -> None:
+        return None
+
+    compute_job_id = "local_metrics"
+    job_dir = tmp_path / compute_job_id
+    job_dir.mkdir()
+    (job_dir / "metrics.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "step": 1,
+                        "epoch": 0,
+                        "timestamp": "2026-06-27T10:00:00",
+                        "loss": 0.5,
+                        "learning_rate": 0.001,
+                        "status": "running",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "step": 2,
+                        "epoch": 0,
+                        "timestamp": "2026-06-27T10:00:01",
+                        "loss": 0.25,
+                        "learning_rate": 0.001,
+                        "status": "running",
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    )
+
+    monkeypatch.setattr(training_service, "_ensure_jobs_loaded", noop_ensure_jobs_loaded)
+    training_service._jobs[TEST_JOB_ID] = {
+        "compute_job_id": compute_job_id,
+        "compute_backend": "local",
+        "output_dir": str(tmp_path),
+        "status": JobStatus.RUNNING,
+    }
+
+    try:
+        result = asyncio.run(training_api.get_training_metrics(TEST_JOB_ID))
+    finally:
+        training_service._jobs.pop(TEST_JOB_ID, None)
+
+    assert result["jobId"] == TEST_JOB_ID
+    assert result["lastStep"] == 2
+    assert result["lastEpoch"] == 0
+    assert [point["value"] for point in result["metrics"]["loss"]] == [0.5, 0.25]
+    assert [point["step"] for point in result["metrics"]["learning_rate"]] == [1, 2]
+    assert "status" not in result["metrics"]
 
 
 def test_training_launch_contract_rejects_missing_dataset_repo() -> None:

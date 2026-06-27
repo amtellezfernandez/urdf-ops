@@ -164,6 +164,7 @@ def test_local_compute_logs_and_artifacts_restore_from_disk(tmp_path: Path) -> N
     job_dir.mkdir()
     (job_dir / "stdout.log").write_text("training complete\n")
     (job_dir / "model.pt").write_text("checkpoint")
+    (job_dir / "metrics.jsonl").write_text('{"step": 1, "loss": 0.5}\n')
     (job_dir / "progress.json").write_text(
         json.dumps(
             {
@@ -182,6 +183,24 @@ def test_local_compute_logs_and_artifacts_restore_from_disk(tmp_path: Path) -> N
 
     assert logs == ["training complete\n"]
     assert any(artifact.name == "model.pt" for artifact in artifacts)
+    assert any(
+        artifact.name == "metrics.jsonl" and artifact.artifact_type == "metrics"
+        for artifact in artifacts
+    )
+
+
+def test_local_compute_read_job_file_rejects_path_escape(tmp_path: Path) -> None:
+    job_dir = tmp_path / TEST_RESTORED_COMPUTE_JOB_ID
+    job_dir.mkdir()
+    (job_dir / "metrics.jsonl").write_text('{"step": 1, "loss": 0.5}\n')
+    (tmp_path / "outside.txt").write_text("secret")
+
+    compute = LocalCompute(output_dir=str(tmp_path))
+
+    assert asyncio.run(compute.read_job_file(TEST_RESTORED_COMPUTE_JOB_ID, "metrics.jsonl")) == (
+        '{"step": 1, "loss": 0.5}\n'
+    )
+    assert asyncio.run(compute.read_job_file(TEST_RESTORED_COMPUTE_JOB_ID, "../outside.txt")) is None
 
 
 async def _collect_logs(compute: LocalCompute, job_id: str) -> list[str]:

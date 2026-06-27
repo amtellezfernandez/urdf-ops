@@ -192,6 +192,7 @@ _jobs: Dict[str, Dict[str, Any]] = {}
 JOB_INFO_COMPUTE_CONFIG_KEY = "compute_config"
 PERSISTED_COMPUTE_CONFIG_KEY = "compute_runtime"
 TRAINING_PRIMARY_METRIC_KEYS = frozenset({"loss", "learning_rate", "grad_norm"})
+TRAINING_METRICS_HISTORY_FILE = "metrics.jsonl"
 
 
 def _is_secret_runtime_config_field(field_name: str) -> bool:
@@ -264,6 +265,118 @@ def _additional_numeric_metrics(metrics: Dict[str, Any]) -> Dict[str, float]:
         if numeric_value is not None:
             additional[key] = numeric_value
     return additional
+
+
+def _empty_metrics_history(job_id: str) -> Dict[str, Any]:
+    return {
+        "jobId": job_id,
+        "metrics": {},
+        "lastStep": 0,
+        "lastEpoch": 0,
+    }
+
+
+def _timestamp_to_epoch_ms(value: Any) -> int:
+    if isinstance(value, bool):
+        return int(datetime.now().timestamp() * 1000)
+    if isinstance(value, Real):
+        timestamp = float(value)
+        if timestamp > 10_000_000_000:
+            return int(timestamp)
+        return int(timestamp * 1000)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return int(parsed.timestamp() * 1000)
+        except ValueError:
+            pass
+    return int(datetime.now().timestamp() * 1000)
+
+
+def _int_metric_axis_value(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _metrics_history_from_jsonl(job_id: str, metrics_text: str) -> Dict[str, Any]:
+    history = _empty_metrics_history(job_id)
+    metrics_by_name: Dict[str, List[Dict[str, Any]]] = {}
+    last_step = 0
+    last_epoch = 0
+
+    for line in metrics_text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+
+        step = _int_metric_axis_value(row.get("step"), last_step)
+        epoch = _int_metric_axis_value(row.get("epoch"), last_epoch)
+        timestamp = _timestamp_to_epoch_ms(row.get("timestamp"))
+        last_step = step
+        last_epoch = epoch
+
+        for name, value in row.items():
+            if name in {"step", "epoch", "timestamp"}:
+                continue
+            numeric_value = _numeric_metric_value(value)
+            if numeric_value is None:
+                continue
+            metrics_by_name.setdefault(name, []).append(
+                {
+                    "step": step,
+                    "epoch": epoch,
+                    "timestamp": timestamp,
+                    "value": numeric_value,
+                }
+            )
+
+    history["metrics"] = metrics_by_name
+    history["lastStep"] = last_step
+    history["lastEpoch"] = last_epoch
+    return history
+
+
+def _metrics_history_from_status(job_id: str, status: TrainingStatusResponse) -> Dict[str, Any]:
+    if not status.metrics:
+        return _empty_metrics_history(job_id)
+
+    progress = status.progress
+    step = progress.current_step if progress else 0
+    epoch = progress.current_epoch if progress else 0
+    timestamp_ms = int(datetime.now().timestamp() * 1000)
+    metric_values = {
+        "loss": status.metrics.loss,
+        "learning_rate": status.metrics.learning_rate,
+        "grad_norm": status.metrics.grad_norm,
+        **status.metrics.additional,
+    }
+    metrics = {
+        name: [
+            {
+                "step": step,
+                "epoch": epoch,
+                "timestamp": timestamp_ms,
+                "value": value,
+            }
+        ]
+        for name, value in metric_values.items()
+        if value is not None
+    }
+    return {
+        "jobId": job_id,
+        "metrics": metrics,
+        "lastStep": step,
+        "lastEpoch": epoch,
+    }
 
 
 def _job_info_from_record(job_record: JobRecord) -> Dict[str, Any]:
@@ -1127,6 +1240,36 @@ async def get_training_status(job_id: str) -> TrainingStatusResponse:
             error=str(e),
             compute_backend=job_info.get("compute_backend", "unknown"),
         )
+
+
+async def get_training_metrics(job_id: str) -> dict:
+    """Return training metric history for charts, falling back to latest status."""
+    await _ensure_jobs_loaded()
+
+    if job_id not in _jobs:
+        await _load_job_from_store(job_id)
+
+    if job_id in _jobs:
+        job_info = _jobs[job_id]
+        compute_job_id = job_info.get("compute_job_id")
+        if compute_job_id:
+            try:
+                compute = get_compute(_job_compute_config(job_info))
+                read_job_file = getattr(compute, "read_job_file", None)
+                if callable(read_job_file):
+                    metrics_text = await read_job_file(
+                        compute_job_id,
+                        TRAINING_METRICS_HISTORY_FILE,
+                    )
+                    if metrics_text:
+                        history = _metrics_history_from_jsonl(job_id, metrics_text)
+                        if history["metrics"]:
+                            return history
+            except Exception as e:
+                logger.warning("Failed to read metrics history for job %s: %s", job_id, e)
+
+    status = await get_training_status(job_id)
+    return _metrics_history_from_status(job_id, status)
 
 
 async def get_job_artifacts(job_id: str) -> dict:

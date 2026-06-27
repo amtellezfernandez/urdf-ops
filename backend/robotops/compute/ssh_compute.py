@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import uuid
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from backend.robotops.compute_protocol import (
@@ -295,6 +295,34 @@ class SSHDockerCompute:
         stderr_tail = await self._read_remote_tail(f"{remote_job_dir}/stderr.log", lines)
         combined = "\n".join(part for part in (stdout_tail, stderr_tail) if part)
         return combined or None
+
+    async def read_job_file(
+        self,
+        job_id: str,
+        relative_path: str,
+        tail: Optional[int] = None,
+    ) -> Optional[str]:
+        """Read a text file from a remote job directory."""
+        rel_path = PurePosixPath(relative_path)
+        if rel_path.is_absolute() or any(part in {"", ".."} for part in rel_path.parts):
+            return None
+
+        job = self._ensure_job(job_id)
+        remote_path = f"{job['remote_job_dir']}/{rel_path.as_posix()}"
+        if tail and tail > 0:
+            command = (
+                f"test -f {shlex.quote(remote_path)} && "
+                f"tail -n {int(tail)} {shlex.quote(remote_path)} || true"
+            )
+        else:
+            command = (
+                f"test -f {shlex.quote(remote_path)} && "
+                f"cat {shlex.quote(remote_path)} || true"
+            )
+        result = await self._run_ssh(command, timeout=30)
+        if result.returncode != 0 or not result.stdout:
+            return None
+        return result.stdout
 
     async def _read_remote_progress(self, remote_path: str) -> tuple[Optional[JobProgress], Dict[str, Any]]:
         result = await self._run_ssh(

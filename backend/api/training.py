@@ -10,7 +10,6 @@ This module provides REST API endpoints for:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -142,44 +141,8 @@ async def get_training_logs(job_id: str) -> dict:
 
 @router.get("/metrics/{job_id}")
 async def get_training_metrics(job_id: str) -> dict:
-    """Return the latest available training metrics in chart history format."""
-    status = await training_service.get_training_status(job_id)
-    if not status.metrics:
-        return {
-            "jobId": job_id,
-            "metrics": {},
-            "lastStep": 0,
-            "lastEpoch": 0,
-        }
-
-    progress = status.progress
-    step = progress.current_step if progress else 0
-    epoch = progress.current_epoch if progress else 0
-    timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    metric_values = {
-        "loss": status.metrics.loss,
-        "learning_rate": status.metrics.learning_rate,
-        "grad_norm": status.metrics.grad_norm,
-        **status.metrics.additional,
-    }
-    metrics = {
-        name: [
-            {
-                "step": step,
-                "epoch": epoch,
-                "timestamp": timestamp_ms,
-                "value": value,
-            }
-        ]
-        for name, value in metric_values.items()
-        if value is not None
-    }
-    return {
-        "jobId": job_id,
-        "metrics": metrics,
-        "lastStep": step,
-        "lastEpoch": epoch,
-    }
+    """Return available training metrics in chart history format."""
+    return await training_service.get_training_metrics(job_id)
 
 
 @router.get("/artifacts/{job_id}")
