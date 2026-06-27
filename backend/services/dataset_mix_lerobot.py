@@ -423,6 +423,35 @@ def _build_episode_spans(
     return tuple(spans)
 
 
+def _selected_episode_indexes(dataset: LocalLeRobotSourceDataset) -> set[int]:
+    return set(dataset.source.episodes or [])
+
+
+def _episode_is_selected(dataset: LocalLeRobotSourceDataset, episode_index: int) -> bool:
+    selected = _selected_episode_indexes(dataset)
+    return not selected or episode_index in selected
+
+
+def _validate_selected_episodes(dataset: LocalLeRobotSourceDataset) -> None:
+    selected = _selected_episode_indexes(dataset)
+    if not selected:
+        return
+    available = {span.episode_index for span in dataset.episode_spans}
+    missing = sorted(selected - available)
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Dataset source {dataset.source.source_id} does not contain "
+                f"selected episodes {missing[:10]}"
+            ),
+        )
+
+
+def _selected_episode_count(dataset: LocalLeRobotSourceDataset) -> int:
+    return sum(1 for span in dataset.episode_spans if _episode_is_selected(dataset, span.episode_index))
+
+
 def _validate_source_dataset_contract(dataset: LocalLeRobotSourceDataset) -> None:
     span_episode_indexes = {span.episode_index for span in dataset.episode_spans}
 
@@ -927,7 +956,9 @@ def _resolve_referenced_video_files(
     references: set[tuple[int, int]] = set()
     chunk_field = f"videos/{video_key}/chunk_index"
     file_field = f"videos/{video_key}/file_index"
-    for episode_row in dataset.episode_rows_by_index.values():
+    for episode_index, episode_row in dataset.episode_rows_by_index.items():
+        if not _episode_is_selected(dataset, episode_index):
+            continue
         source_chunk = episode_row.get(chunk_field)
         source_file = episode_row.get(file_field)
         if source_chunk is None or source_file is None:
@@ -1389,6 +1420,8 @@ def merge_local_lerobot_datasets(
     ]
     if not local_datasets:
         raise HTTPException(status_code=400, detail="Native local LeRobot merge requires at least one local source")
+    for dataset in local_datasets:
+        _validate_selected_episodes(dataset)
     load_duration_sec = perf_counter() - load_started_at
 
     validation_started_at = perf_counter()
@@ -1433,6 +1466,10 @@ def merge_local_lerobot_datasets(
     next_video_chunk_index_by_key: dict[str, int] = {}
     merged_task_index_values: list[int] = []
     merged_episode_index_values: list[int] = []
+    merged_frame_index_values: list[int] = []
+    merged_timestamp_values: list[float] = []
+    merged_action_vectors: list[list[float]] = []
+    merged_state_vectors: list[list[float]] = []
     next_dataset_index = 0
     next_episode_index = 0
     next_partition_index = 0
@@ -1469,6 +1506,8 @@ def merge_local_lerobot_datasets(
     for dataset in local_datasets:
         for episode_span in dataset.episode_spans:
             source_episode_index = episode_span.episode_index
+            if not _episode_is_selected(dataset, source_episode_index):
+                continue
             source_row_count = episode_span.row_to_index - episode_span.row_from_index
             if current_episode_rows and (
                 len(current_episode_rows) >= partition_plan.target_episodes_per_partition
@@ -1510,6 +1549,20 @@ def merge_local_lerobot_datasets(
                 episode_task_index_values.append(target_task_index)
                 merged_task_index_values.append(target_task_index)
                 merged_episode_index_values.append(next_episode_index)
+                merged_frame_index_values.append(frame_offset)
+                source_timestamp = source_row.get("timestamp")
+                if isinstance(source_timestamp, (int, float)) and not isinstance(source_timestamp, bool):
+                    merged_timestamp_values.append(float(source_timestamp))
+                source_action = source_row.get("action")
+                if isinstance(source_action, list):
+                    merged_action_vectors.append(
+                        _coerce_float_vector(source_action, field_name="action")
+                    )
+                source_state = source_row.get("observation.state")
+                if isinstance(source_state, list):
+                    merged_state_vectors.append(
+                        _coerce_float_vector(source_state, field_name="observation.state")
+                    )
                 merged_row = dict(source_row)
                 merged_row["index"] = next_dataset_index
                 merged_row["episode_index"] = next_episode_index
@@ -1553,6 +1606,9 @@ def merge_local_lerobot_datasets(
             current_episode_rows.append(merged_episode_row)
             next_episode_index += 1
 
+    if next_episode_index == 0:
+        raise HTTPException(status_code=400, detail="Selected dataset sources did not contain any episodes")
+
     flush_partition()
     partition_duration_sec = perf_counter() - partition_started_at
     _replace_stats_entry(
@@ -1570,6 +1626,17 @@ def merge_local_lerobot_datasets(
         key="task_index",
         values=merged_task_index_values,
     )
+    _replace_stats_entry(
+        merged_stats,
+        key="frame_index",
+        values=merged_frame_index_values,
+    )
+    if merged_timestamp_values:
+        merged_stats["timestamp"] = _build_scalar_stats(merged_timestamp_values)
+    if merged_action_vectors:
+        merged_stats["action"] = _build_vector_stats(merged_action_vectors)
+    if merged_state_vectors:
+        merged_stats["observation.state"] = _build_vector_stats(merged_state_vectors)
     partition_manifest = _build_partition_manifest(
         partition_plan=partition_plan,
         compatibility=compatibility,
@@ -1602,6 +1669,11 @@ def merge_local_lerobot_datasets(
             "total_tasks": finalized["total_tasks"],
             "datasets_loaded": len(local_datasets),
             "dataset_sources": [dataset.source.canonical_source for dataset in local_datasets],
+            "dataset_episode_filters": {
+                dataset.source.source_id: dataset.source.episodes
+                for dataset in local_datasets
+                if dataset.source.episodes
+            },
             "data_chunks_written": finalized["data_chunks_written"],
             "partition_count": len(partition_refs),
             "partition_manifest_path": _artifact_path_string(
@@ -1618,8 +1690,8 @@ def merge_local_lerobot_datasets(
                 "total": round(total_duration_sec, 6),
             },
             "source_count": len(local_datasets),
-            "source_episode_count": sum(len(dataset.episode_rows_by_index) for dataset in local_datasets),
-            "source_frame_count": sum(len(dataset.frame_rows) for dataset in local_datasets),
+            "source_episode_count": sum(_selected_episode_count(dataset) for dataset in local_datasets),
+            "source_frame_count": next_dataset_index,
             "partition_count": len(partition_refs),
             "data_chunks_written": finalized["data_chunks_written"],
             "video_mode": video_policy.mode,

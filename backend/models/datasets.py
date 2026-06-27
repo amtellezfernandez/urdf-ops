@@ -18,6 +18,12 @@ DatasetMixExecutionMode = Literal["native-local-lerobot", "legacy-subprocess"]
 DatasetMixPartitionStrategy = Literal["episode-window"]
 
 
+class DatasetMixEpisodeFilter(BaseModel):
+    source_kind: Literal["repo", "local"]
+    source_index: int = Field(..., ge=0)
+    episodes: list[int] = Field(default_factory=list)
+
+
 class DatasetMixRequest(BaseModel):
     repo_ids: list[NonEmptyDatasetValue] = Field(
         default_factory=list,
@@ -26,6 +32,10 @@ class DatasetMixRequest(BaseModel):
     local_paths: list[NonEmptyDatasetValue] = Field(
         default_factory=list,
         description="Local dataset paths under backend allowlisted roots",
+    )
+    episode_filters: list[DatasetMixEpisodeFilter] = Field(
+        default_factory=list,
+        description="Optional per-source episode subsets keyed by source kind and index",
     )
     alignment: "DatasetMixAlignmentRequest"
 
@@ -123,6 +133,7 @@ class DatasetMixSourceRef(BaseModel):
     source_kind: Literal["repo", "local", "virtual"]
     source_value: str = Field(..., min_length=1)
     canonical_source: str = Field(..., min_length=1)
+    episodes: list[int] | None = None
 
 
 class DatasetMixExecutionPlan(BaseModel):

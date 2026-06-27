@@ -30,17 +30,19 @@ def _read_payload() -> dict[str, Any]:
 
 def _load_dataset(dataset_class: type, source: dict[str, Any]) -> Any:
     source_kind = source.get("source_kind")
+    episodes = source.get("episodes")
+    dataset_kwargs = {"episodes": episodes} if isinstance(episodes, list) and episodes else {}
     if source_kind == "local":
         root = source.get("canonical_source")
         if not isinstance(root, str) or not root:
             raise ValueError("Local LeRobot source is missing canonical_source")
         source_root = Path(root)
-        return dataset_class(source_root.name, root=source_root)
+        return dataset_class(source_root.name, root=source_root, **dataset_kwargs)
     if source_kind == "repo":
         repo_id = source.get("source_value")
         if not isinstance(repo_id, str) or not repo_id:
             raise ValueError("Hub LeRobot source is missing source_value")
-        return dataset_class(repo_id)
+        return dataset_class(repo_id, **dataset_kwargs)
     raise ValueError(f"Official LeRobot runner does not support source kind: {source_kind}")
 
 

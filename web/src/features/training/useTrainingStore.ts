@@ -57,7 +57,7 @@ interface TrainingState {
   prevStep: () => void;
 
   // Config setters
-  setDatasetConfig: (config: DatasetConfig) => void;
+  setDatasetConfig: (config: DatasetConfig | null) => void;
   setModelConfig: (config: ModelConfig) => void;
   setTrainingParams: (params: Partial<TrainingParams>) => void;
   setTrackerConfig: (config: Partial<TrackerConfig>) => void;

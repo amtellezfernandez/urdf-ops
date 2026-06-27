@@ -272,10 +272,10 @@ export function ExperimentDashboard({
           onClick={handleConfigureTraining}
           className={EXPERIMENT_DASHBOARD_CLASS_NAMES.actionButton}
           disabled={!canConfigureTraining}
-          title={canConfigureTraining ? "Configure training" : "Select a dataset first"}
+          title={canConfigureTraining ? "Configure training" : "Choose training data first"}
         >
           <Play className="mr-1.5 h-3.5 w-3.5" />
-          {canConfigureTraining ? "Configure training" : "Select dataset"}
+          {canConfigureTraining ? "Configure training" : "Choose training data"}
         </Button>
       </div>
 

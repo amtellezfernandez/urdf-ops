@@ -489,7 +489,12 @@ class DatasetMixControlPlane:
         self._validate_request(req)
         normalized_local_paths = normalize_local_dataset_paths(req.local_paths)
         treatment_analysis = analyze_dataset_treatment(req, normalized_local_paths)
-        source_refs = list(self._compile_source_refs(treatment_analysis.treatment_manifest.sources))
+        source_refs = list(
+            self._compile_source_refs(
+                treatment_analysis.treatment_manifest.sources,
+                req=req,
+            )
+        )
         execution_plan = compile_dataset_mix_execution_plan(sources=source_refs)
         partition_plan = compile_dataset_mix_partition_plan(
             execution_plan=execution_plan,
@@ -668,6 +673,24 @@ class DatasetMixControlPlane:
                     f"({expected_dataset_count} expected, {len(req.alignment.datasets)} received)."
                 ),
             )
+        seen_filters: set[tuple[str, int]] = set()
+        for episode_filter in req.episode_filters:
+            key = (episode_filter.source_kind, episode_filter.source_index)
+            if key in seen_filters:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Episode filters must be unique per source kind and index: "
+                        f"{episode_filter.source_kind}:{episode_filter.source_index}"
+                    ),
+                )
+            seen_filters.add(key)
+            if not episode_filter.episodes:
+                raise HTTPException(status_code=400, detail="Episode filters cannot be empty")
+            if episode_filter.source_kind == "repo" and episode_filter.source_index >= len(req.repo_ids):
+                raise HTTPException(status_code=400, detail="Repo episode filter source_index is out of range")
+            if episode_filter.source_kind == "local" and episode_filter.source_index >= len(req.local_paths):
+                raise HTTPException(status_code=400, detail="Local episode filter source_index is out of range")
 
     def _persist_manifest(
         self,
@@ -695,14 +718,40 @@ class DatasetMixControlPlane:
             manifest.model_dump(mode="json"),
         )
 
-    def _compile_source_refs(self, sources: Iterable[Any]) -> Iterable[DatasetMixSourceRef]:
+    def _compile_source_refs(
+        self,
+        sources: Iterable[Any],
+        *,
+        req: DatasetMixRequest,
+    ) -> Iterable[DatasetMixSourceRef]:
+        episode_filters = {
+            (episode_filter.source_kind, episode_filter.source_index): sorted(
+                dict.fromkeys(episode_filter.episodes)
+            )
+            for episode_filter in req.episode_filters
+        }
         for source in sources:
+            source_index = None
+            if isinstance(source.source_id, str) and ":" in source.source_id:
+                source_kind, raw_source_index = source.source_id.split(":", 1)
+                try:
+                    source_index = int(raw_source_index)
+                except ValueError:
+                    source_index = None
+            else:
+                source_kind = source.source_kind
+            episodes = (
+                episode_filters.get((source_kind, source_index))
+                if source_index is not None
+                else None
+            )
             yield DatasetMixSourceRef(
                 source_id=source.source_id,
                 dataset_id=source.dataset_id,
                 source_kind=source.source_kind,
                 source_value=source.source_value,
                 canonical_source=source.canonical_source,
+                episodes=episodes,
             )
 
     def _new_job_id(self) -> str:

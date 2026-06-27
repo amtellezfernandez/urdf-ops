@@ -184,11 +184,12 @@ class OfficialLeRobotDatasetMixer:
         }
 
     def _load_dataset(self, dataset_class: type, source: DatasetMixSourceRef) -> Any:
+        dataset_kwargs = {"episodes": source.episodes} if source.episodes else {}
         if source.source_kind == "local":
             source_root = Path(source.canonical_source)
-            return dataset_class(source_root.name, root=source_root)
+            return dataset_class(source_root.name, root=source_root, **dataset_kwargs)
         if source.source_kind == "repo":
-            return dataset_class(source.source_value)
+            return dataset_class(source.source_value, **dataset_kwargs)
         raise HTTPException(
             status_code=400,
             detail=f"Official LeRobot merge does not support source kind: {source.source_kind}",
