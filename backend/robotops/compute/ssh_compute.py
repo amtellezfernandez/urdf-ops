@@ -183,6 +183,7 @@ class SSHDockerCompute:
         env_args = {
             "URDF_STUDIO_JOB_ID": job_id,
             "URDF_STUDIO_JOB_DIR": f"/app/outputs/{job_id}",
+            "PYTHONPATH": "/app",
             "PYTHONUNBUFFERED": "1",
         }
         if env:

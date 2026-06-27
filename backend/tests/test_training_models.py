@@ -14,6 +14,7 @@ from backend.models.training import (
     TrainingStartResponse,
 )
 from backend.app import create_app
+from backend.services.training_policy_compat import normalize_policy_id, prepare_policy_overrides
 from backend.services.training import (
     _dump_internal_model,
     check_training_runtime,
@@ -155,6 +156,39 @@ def test_training_model_catalog_uses_lerobot_architecture_names() -> None:
     assert get_model_info("diffusion_policy") is not None
     assert get_model_info("dreamzero") is not None
     assert get_model_info("vq_bet") is not None
+
+
+def test_training_script_normalizes_ui_policy_ids_for_lerobot() -> None:
+    assert normalize_policy_id("act") == "act"
+    assert normalize_policy_id("diffusion_policy") == "diffusion"
+    assert normalize_policy_id("diffusion-policy") == "diffusion"
+    assert normalize_policy_id("vq_bet") == "vqbet"
+    assert normalize_policy_id("vq-bet") == "vqbet"
+
+
+def test_training_script_filters_policy_overrides_for_installed_lerobot_config() -> None:
+    class FakePolicyConfig:
+        def __init__(
+            self,
+            *,
+            device: str,
+            push_to_hub: bool,
+            repo_id: str,
+            dim_model: int = 256,
+            dropout: float = 0.1,
+        ) -> None:
+            pass
+
+    overrides = prepare_policy_overrides(
+        FakePolicyConfig,
+        {
+            "hidden_dim": 512,
+            "dropout": 0.2,
+            "unsupported": True,
+        },
+    )
+
+    assert overrides == {"dim_model": 512, "dropout": 0.2}
 
 
 def test_training_router_is_registered_on_backend_app() -> None:

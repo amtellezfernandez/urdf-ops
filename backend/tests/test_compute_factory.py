@@ -1,5 +1,6 @@
 import asyncio
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -21,6 +22,28 @@ TEST_CURRENT_STEP = 4
 TEST_TOTAL_STEPS = 4
 TEST_LOSS = 0.25
 TEST_SLEEP_SECONDS = 30
+
+
+class RecordingSSHCompute(SSHDockerCompute):
+    def __init__(self) -> None:
+        super().__init__(host="203.0.113.10", user="ubuntu", use_gpu=False)
+        self.commands: list[str] = []
+
+    async def _run_ssh(
+        self,
+        command: str,
+        timeout: int = 60,
+    ) -> subprocess.CompletedProcess[str]:
+        self.commands.append(command)
+        return subprocess.CompletedProcess(["ssh"], 0, "", "")
+
+    async def _scp_to_remote(
+        self,
+        local_path: Path,
+        remote_path: str,
+        timeout: int = 60,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(["scp"], 0, "", "")
 
 
 def test_local_compute_cache_is_scoped_by_output_dir(tmp_path: Path) -> None:
@@ -88,6 +111,16 @@ def test_get_compute_creates_ssh_backend() -> None:
     assert compute.port == 2222
     assert compute.output_dir == "/scratch/robotops"
 
+
+def test_ssh_compute_launch_sets_container_pythonpath() -> None:
+    compute = RecordingSSHCompute()
+
+    asyncio.run(compute.launch("ignored.py", {"device": "cpu"}))
+
+    docker_commands = [command for command in compute.commands if "docker run -d" in command]
+    assert len(docker_commands) == 1
+    assert "-e PYTHONPATH=/app" in docker_commands[0]
+    assert "python /app/backend/scripts/train_policy.py" in docker_commands[0]
 
 
 def test_local_compute_status_restores_completed_job_from_disk(tmp_path: Path) -> None:

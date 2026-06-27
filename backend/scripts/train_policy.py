@@ -33,8 +33,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+# Support direct execution with `python backend/scripts/train_policy.py`.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import numpy as np
 import torch
+
+from backend.services.training_policy_compat import normalize_policy_id, prepare_policy_overrides
 
 logging.basicConfig(
     level=logging.INFO,
@@ -131,17 +138,17 @@ def write_progress(
 
 def get_policy_config_class(architecture: str):
     """Get the config class for a given policy architecture."""
-    normalized_architecture = architecture.replace("-", "_")
-    if normalized_architecture == "act":
+    architecture = normalize_policy_id(architecture)
+    if architecture == "act":
         from lerobot.policies import ACTConfig
         return ACTConfig
-    elif normalized_architecture in {"diffusion", "diffusion_policy"}:
+    elif architecture == "diffusion":
         from lerobot.policies import DiffusionConfig
         return DiffusionConfig
-    elif normalized_architecture == "tdmpc":
+    elif architecture == "tdmpc":
         from lerobot.policies import TDMPCConfig
         return TDMPCConfig
-    elif normalized_architecture in {"vqbet", "vq_bet"}:
+    elif architecture == "vqbet":
         from lerobot.policies import VQBeTConfig
         return VQBeTConfig
     else:
@@ -150,17 +157,17 @@ def get_policy_config_class(architecture: str):
 
 def get_policy_class(architecture: str):
     """Get the policy class for a given architecture."""
-    normalized_architecture = architecture.replace("-", "_")
-    if normalized_architecture == "act":
+    architecture = normalize_policy_id(architecture)
+    if architecture == "act":
         from lerobot.policies.act.modeling_act import ACTPolicy
         return ACTPolicy
-    elif normalized_architecture in {"diffusion", "diffusion_policy"}:
+    elif architecture == "diffusion":
         from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
         return DiffusionPolicy
-    elif normalized_architecture == "tdmpc":
+    elif architecture == "tdmpc":
         from lerobot.policies.tdmpc.modeling_tdmpc import TDMPCPolicy
         return TDMPCPolicy
-    elif normalized_architecture in {"vqbet", "vq_bet"}:
+    elif architecture == "vqbet":
         from lerobot.policies.vqbet.modeling_vqbet import VQBeTPolicy
         return VQBeTPolicy
     else:
@@ -351,7 +358,7 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
         raise ValueError(f"Invalid dataset config: {dataset_config}")
 
     # Determine architecture and device
-    architecture = model_config.get("architecture", "act")
+    architecture = normalize_policy_id(model_config.get("architecture", "act"))
     policy_overrides = model_config.get("config", {})
     device_str = config.get("device", "cuda" if torch.cuda.is_available() else "cpu")
 
@@ -359,6 +366,7 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
 
     # Get policy config class
     PolicyConfigClass = get_policy_config_class(architecture)
+    policy_overrides = prepare_policy_overrides(PolicyConfigClass, policy_overrides)
 
     # Create policy config
     policy_cfg = PolicyConfigClass(
