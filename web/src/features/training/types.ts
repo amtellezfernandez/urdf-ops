@@ -19,7 +19,7 @@ export type ModelArchitecture =
 
 export type TrackerType = "mlflow" | "wandb" | "none";
 
-export type ComputeType = "local" | "modal" | "runpod" | "macrodata";
+export type ComputeType = "local" | "ssh" | "modal" | "runpod" | "macrodata";
 
 export type JobStatus =
   | "pending"
@@ -52,6 +52,7 @@ export interface TrainingParams {
   batchSize: number;
   learningRate: number;
   epochs: number;
+  maxSteps?: number;
   seed: number;
   gradientAccumulationSteps: number;
   maxGradNorm?: number;
@@ -81,6 +82,14 @@ export interface ComputeConfig {
   apiKey?: string;
   useSpot: boolean;
   timeoutHours: number;
+  sshHost?: string;
+  sshUser?: string;
+  sshPort?: number;
+  sshKeyPath?: string;
+  remoteOutputDir?: string;
+  dockerImage?: string;
+  dockerArgs?: string;
+  sshOptions?: string;
 }
 
 // ============================================================================
@@ -192,6 +201,24 @@ export interface TrainingComputeBackendsResponse {
   backends: TrainingComputeBackendCapability[];
 }
 
+export interface TrainingPreflightCheck {
+  name: string;
+  label: string;
+  status: "pass" | "warn" | "fail";
+  message: string;
+  details: Record<string, unknown>;
+}
+
+export interface TrainingPreflightResponse {
+  computeBackend: string;
+  device: string;
+  ready: boolean;
+  canTrainLocally: boolean;
+  cloudRequired: boolean;
+  recommendation: string;
+  checks: TrainingPreflightCheck[];
+}
+
 // ============================================================================
 // Model Architecture Info
 // ============================================================================
@@ -271,6 +298,7 @@ export const DEFAULT_TRAINING_PARAMS: TrainingParams = {
   batchSize: 32,
   learningRate: 1e-4,
   epochs: 100,
+  maxSteps: undefined,
   seed: 42,
   gradientAccumulationSteps: 1,
   maxGradNorm: 1.0,
@@ -292,4 +320,7 @@ export const DEFAULT_COMPUTE_CONFIG: ComputeConfig = {
   device: "cuda",
   useSpot: true,
   timeoutHours: 4.0,
+  sshPort: 22,
+  remoteOutputDir: "/tmp/robotops-outputs",
+  dockerImage: "urdf-ops:training",
 };

@@ -188,8 +188,23 @@ def build_training_launch_contract(
         "default_gpu": request.compute.gpu,
         "output_dir": str(output_dir),
     }
-    if get_enum_value(request.compute.type) == "local":
+    compute_type = get_enum_value(request.compute.type)
+    if compute_type == "local":
         compute_config["python_path"] = str(lerobot_python_path)
+    elif compute_type == "ssh":
+        compute_config.update(
+            {
+                "host": request.compute.ssh_host,
+                "user": request.compute.ssh_user,
+                "port": request.compute.ssh_port,
+                "key_path": request.compute.ssh_key_path,
+                "output_dir": request.compute.remote_output_dir,
+                "docker_image": request.compute.docker_image,
+                "docker_args": request.compute.docker_args,
+                "ssh_options": request.compute.ssh_options,
+                "use_gpu": request.compute.device == "cuda",
+            }
+        )
 
     training_params = dump_internal_model(request.training)
     training_params["output_dir"] = str(output_dir)

@@ -64,6 +64,7 @@ LOCAL_ARTIFACT_PATTERNS = {
     "*.mp4": "video",
     "*.log": "log",
     "*.json": "config",
+    "*.jsonl": "metrics",
 }
 
 
@@ -616,6 +617,32 @@ class LocalCompute:
         )
         logger.info(f"Cancelled job {job_id}")
         return True
+
+    async def read_job_file(
+        self,
+        job_id: str,
+        relative_path: str,
+        tail: Optional[int] = None,
+    ) -> Optional[str]:
+        """Read a text file from a job directory."""
+        if not self._ensure_job_loaded(job_id):
+            return None
+
+        job_dir = Path(self._jobs[job_id]["job_dir"]).resolve()
+        candidate = (job_dir / relative_path).resolve()
+        try:
+            candidate.relative_to(job_dir)
+        except ValueError:
+            return None
+        if not candidate.is_file():
+            return None
+
+        try:
+            if tail and tail > 0:
+                return "".join(candidate.read_text().splitlines(keepends=True)[-tail:])
+            return candidate.read_text()
+        except OSError:
+            return None
 
     async def list_artifacts(self, job_id: str) -> List[JobArtifact]:
         """List artifacts in job directory."""

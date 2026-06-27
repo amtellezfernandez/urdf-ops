@@ -10,7 +10,6 @@ This module provides REST API endpoints for:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,6 +23,7 @@ from backend.models.training import (
     TrainingCancelRequest,
     TrainingComputeBackendsResponse,
     TrainingJobsListResponse,
+    TrainingPreflightResponse,
     TrainingRuntimeCheckResponse,
     TrainingStartRequest,
     TrainingStartResponse,
@@ -58,6 +58,12 @@ async def start_training(request: TrainingStartRequest) -> TrainingStartResponse
     to monitor progress.
     """
     return await training_service.start_training(request)
+
+
+@router.post("/preflight", response_model=TrainingPreflightResponse)
+async def preflight_training(request: TrainingStartRequest) -> TrainingPreflightResponse:
+    """Validate a training launch before starting it."""
+    return await training_service.preflight_training(request)
 
 
 @router.get("/status/{job_id}", response_model=TrainingStatusResponse)
@@ -135,44 +141,14 @@ async def get_training_logs(job_id: str) -> dict:
 
 @router.get("/metrics/{job_id}")
 async def get_training_metrics(job_id: str) -> dict:
-    """Return the latest available training metrics in chart history format."""
-    status = await training_service.get_training_status(job_id)
-    if not status.metrics:
-        return {
-            "jobId": job_id,
-            "metrics": {},
-            "lastStep": 0,
-            "lastEpoch": 0,
-        }
+    """Return available training metrics in chart history format."""
+    return await training_service.get_training_metrics(job_id)
 
-    progress = status.progress
-    step = progress.current_step if progress else 0
-    epoch = progress.current_epoch if progress else 0
-    timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    metric_values = {
-        "loss": status.metrics.loss,
-        "learning_rate": status.metrics.learning_rate,
-        "grad_norm": status.metrics.grad_norm,
-        **status.metrics.additional,
-    }
-    metrics = {
-        name: [
-            {
-                "step": step,
-                "epoch": epoch,
-                "timestamp": timestamp_ms,
-                "value": value,
-            }
-        ]
-        for name, value in metric_values.items()
-        if value is not None
-    }
-    return {
-        "jobId": job_id,
-        "metrics": metrics,
-        "lastStep": step,
-        "lastEpoch": epoch,
-    }
+
+@router.get("/artifacts/{job_id}")
+async def get_training_artifacts(job_id: str) -> dict:
+    """List artifacts produced by a training job."""
+    return await training_service.get_job_artifacts(job_id)
 
 
 # ============================================================================

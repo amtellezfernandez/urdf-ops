@@ -25,7 +25,7 @@ const LR_SCHEDULERS = [
 export function HyperparameterForm() {
   const { trainingParams, setTrainingParams } = useTrainingStore();
 
-  const handleChange = (key: string, value: string | number) => {
+  const handleChange = (key: string, value: string | number | undefined) => {
     setTrainingParams({ [key]: value });
   };
 
@@ -81,6 +81,24 @@ export function HyperparameterForm() {
             />
             <p className="text-[10px] text-muted-foreground">
               Total training epochs
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs">Max Steps</Label>
+            <Input
+              type="number"
+              min={1}
+              placeholder="Full run"
+              value={trainingParams.maxSteps || ""}
+              onChange={(e) => {
+                const value = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                handleChange("maxSteps", value as number);
+              }}
+              className="h-8 text-sm"
+            />
+            <p className="text-[10px] text-muted-foreground">
+              Hard limit for smoke runs
             </p>
           </div>
 

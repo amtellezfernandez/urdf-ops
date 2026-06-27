@@ -1,5 +1,6 @@
 import asyncio
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from backend.robotops.compute_factory import (
     ComputeConfig,
 )
 from backend.robotops.compute.local_compute import LocalCompute
+from backend.robotops.compute.ssh_compute import SSHDockerCompute
 from backend.robotops.compute_protocol import JobState
 
 
@@ -20,6 +22,28 @@ TEST_CURRENT_STEP = 4
 TEST_TOTAL_STEPS = 4
 TEST_LOSS = 0.25
 TEST_SLEEP_SECONDS = 30
+
+
+class RecordingSSHCompute(SSHDockerCompute):
+    def __init__(self) -> None:
+        super().__init__(host="203.0.113.10", user="ubuntu", use_gpu=False)
+        self.commands: list[str] = []
+
+    async def _run_ssh(
+        self,
+        command: str,
+        timeout: int = 60,
+    ) -> subprocess.CompletedProcess[str]:
+        self.commands.append(command)
+        return subprocess.CompletedProcess(["ssh"], 0, "", "")
+
+    async def _scp_to_remote(
+        self,
+        local_path: Path,
+        remote_path: str,
+        timeout: int = 60,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(["scp"], 0, "", "")
 
 
 def test_local_compute_cache_is_scoped_by_output_dir(tmp_path: Path) -> None:
@@ -67,6 +91,37 @@ def test_compute_cache_key_does_not_store_plaintext_api_key() -> None:
     assert "password_sha256" in cache_key
 
 
+def test_get_compute_creates_ssh_backend() -> None:
+    _COMPUTE_INSTANCES.clear()
+
+    compute = get_compute(
+        {
+            "type": "ssh",
+            "ssh_host": "203.0.113.10",
+            "ssh_user": "ubuntu",
+            "ssh_port": 2222,
+            "remote_output_dir": "/scratch/robotops",
+            "docker_image": "urdf-ops:training",
+        }
+    )
+
+    assert isinstance(compute, SSHDockerCompute)
+    assert compute.host == "203.0.113.10"
+    assert compute.user == "ubuntu"
+    assert compute.port == 2222
+    assert compute.output_dir == "/scratch/robotops"
+
+
+def test_ssh_compute_launch_sets_container_pythonpath() -> None:
+    compute = RecordingSSHCompute()
+
+    asyncio.run(compute.launch("ignored.py", {"device": "cpu"}))
+
+    docker_commands = [command for command in compute.commands if "docker run -d" in command]
+    assert len(docker_commands) == 1
+    assert "-e PYTHONPATH=/app" in docker_commands[0]
+    assert "python /app/backend/scripts/train_policy.py" in docker_commands[0]
+
 
 def test_local_compute_status_restores_completed_job_from_disk(tmp_path: Path) -> None:
     job_dir = tmp_path / TEST_RESTORED_COMPUTE_JOB_ID
@@ -109,6 +164,7 @@ def test_local_compute_logs_and_artifacts_restore_from_disk(tmp_path: Path) -> N
     job_dir.mkdir()
     (job_dir / "stdout.log").write_text("training complete\n")
     (job_dir / "model.pt").write_text("checkpoint")
+    (job_dir / "metrics.jsonl").write_text('{"step": 1, "loss": 0.5}\n')
     (job_dir / "progress.json").write_text(
         json.dumps(
             {
@@ -127,6 +183,24 @@ def test_local_compute_logs_and_artifacts_restore_from_disk(tmp_path: Path) -> N
 
     assert logs == ["training complete\n"]
     assert any(artifact.name == "model.pt" for artifact in artifacts)
+    assert any(
+        artifact.name == "metrics.jsonl" and artifact.artifact_type == "metrics"
+        for artifact in artifacts
+    )
+
+
+def test_local_compute_read_job_file_rejects_path_escape(tmp_path: Path) -> None:
+    job_dir = tmp_path / TEST_RESTORED_COMPUTE_JOB_ID
+    job_dir.mkdir()
+    (job_dir / "metrics.jsonl").write_text('{"step": 1, "loss": 0.5}\n')
+    (tmp_path / "outside.txt").write_text("secret")
+
+    compute = LocalCompute(output_dir=str(tmp_path))
+
+    assert asyncio.run(compute.read_job_file(TEST_RESTORED_COMPUTE_JOB_ID, "metrics.jsonl")) == (
+        '{"step": 1, "loss": 0.5}\n'
+    )
+    assert asyncio.run(compute.read_job_file(TEST_RESTORED_COMPUTE_JOB_ID, "../outside.txt")) is None
 
 
 async def _collect_logs(compute: LocalCompute, job_id: str) -> list[str]:

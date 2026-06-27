@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
 
+import backend.services.training as training_service
 import backend.api.training as training_api
 from backend.models.training import (
     JobStatus,
@@ -13,12 +15,15 @@ from backend.models.training import (
     TrainingStartResponse,
 )
 from backend.app import create_app
+from backend.services.training_policy_compat import normalize_policy_id, prepare_policy_overrides
 from backend.services.training import (
     _dump_internal_model,
     check_training_runtime,
     get_model_info,
+    get_job_artifacts,
     list_models,
     list_training_compute_backends,
+    preflight_training,
     start_training,
     validate_training_compute_backend,
 )
@@ -30,6 +35,7 @@ from backend.services.training_params import (
 
 
 TEST_BATCH_SIZE = 4
+TEST_MAX_STEPS = 2
 TEST_DATASET_REPO_ID = "lerobot/pusht"
 TEST_JOB_ID = "train_1234"
 TEST_COMPUTE_JOB_ID = "local_1234"
@@ -102,13 +108,14 @@ def test_training_start_request_accepts_ui_camel_case_payloads() -> None:
         {
             "dataset": {"source": "huggingface", "repoId": TEST_DATASET_REPO_ID},
             "model": {"architecture": ModelArchitecture.DIFFUSION_POLICY.value},
-            "training": {"batchSize": TEST_BATCH_SIZE},
+            "training": {"batchSize": TEST_BATCH_SIZE, "maxSteps": TEST_MAX_STEPS},
         }
     )
 
     assert request.dataset.repo_id == TEST_DATASET_REPO_ID
     assert request.model.architecture == ModelArchitecture.DIFFUSION_POLICY.value
     assert request.training.batch_size == TEST_BATCH_SIZE
+    assert request.training.max_steps == TEST_MAX_STEPS
 
 
 def test_training_responses_serialize_to_ui_camel_case() -> None:
@@ -127,7 +134,7 @@ def test_training_service_internal_dump_keeps_script_snake_case() -> None:
     request = TrainingStartRequest.model_validate(
         {
             "dataset": {"repoId": TEST_DATASET_REPO_ID},
-            "training": {"batchSize": TEST_BATCH_SIZE},
+            "training": {"batchSize": TEST_BATCH_SIZE, "maxSteps": TEST_MAX_STEPS},
         }
     )
 
@@ -137,7 +144,9 @@ def test_training_service_internal_dump_keeps_script_snake_case() -> None:
     assert dataset_config["repo_id"] == TEST_DATASET_REPO_ID
     assert "repoId" not in dataset_config
     assert training_config["batch_size"] == TEST_BATCH_SIZE
+    assert training_config["max_steps"] == TEST_MAX_STEPS
     assert "batchSize" not in training_config
+    assert "maxSteps" not in training_config
 
 
 def test_training_model_catalog_uses_lerobot_architecture_names() -> None:
@@ -150,14 +159,49 @@ def test_training_model_catalog_uses_lerobot_architecture_names() -> None:
     assert get_model_info("vq_bet") is not None
 
 
+def test_training_script_normalizes_ui_policy_ids_for_lerobot() -> None:
+    assert normalize_policy_id("act") == "act"
+    assert normalize_policy_id("diffusion_policy") == "diffusion"
+    assert normalize_policy_id("diffusion-policy") == "diffusion"
+    assert normalize_policy_id("vq_bet") == "vqbet"
+    assert normalize_policy_id("vq-bet") == "vqbet"
+
+
+def test_training_script_filters_policy_overrides_for_installed_lerobot_config() -> None:
+    class FakePolicyConfig:
+        def __init__(
+            self,
+            *,
+            device: str,
+            push_to_hub: bool,
+            repo_id: str,
+            dim_model: int = 256,
+            dropout: float = 0.1,
+        ) -> None:
+            pass
+
+    overrides = prepare_policy_overrides(
+        FakePolicyConfig,
+        {
+            "hidden_dim": 512,
+            "dropout": 0.2,
+            "unsupported": True,
+        },
+    )
+
+    assert overrides == {"dim_model": 512, "dropout": 0.2}
+
+
 def test_training_router_is_registered_on_backend_app() -> None:
     app = create_app()
     registered_paths = {route.path for route in app.routes}
 
     assert "/training/models" in registered_paths
     assert "/training/start" in registered_paths
+    assert "/training/preflight" in registered_paths
     assert "/training/logs/{job_id}" in registered_paths
     assert "/training/metrics/{job_id}" in registered_paths
+    assert "/training/artifacts/{job_id}" in registered_paths
     assert "/training/runtime-check" in registered_paths
     assert "/training/compute/backends" in registered_paths
 
@@ -179,6 +223,8 @@ def test_training_compute_backends_fail_closed_for_cloud_providers() -> None:
 
     assert backends_by_type["local"].enabled is True
     assert backends_by_type["local"].production_ready is True
+    assert backends_by_type["ssh"].enabled is True
+    assert backends_by_type["ssh"].production_ready is True
     assert backends_by_type["modal"].enabled is False
     assert backends_by_type["runpod"].enabled is False
     assert backends_by_type["macrodata"].enabled is False
@@ -199,6 +245,169 @@ def test_training_compute_validation_rejects_cloud_credentials() -> None:
     )
 
     assert validate_training_compute_backend(request.compute) == TRAINING_CLOUD_COMPUTE_DISABLED_MESSAGE
+
+
+def test_training_compute_validation_requires_ssh_target() -> None:
+    request = TrainingStartRequest.model_validate(
+        {
+            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "model": {"architecture": ModelArchitecture.ACT.value},
+            "compute": {"type": "ssh", "sshUser": "ubuntu"},
+        }
+    )
+
+    assert validate_training_compute_backend(request.compute) == "Remote Docker training requires an SSH host and user."
+
+
+def test_training_preflight_blocks_disabled_cloud_backend() -> None:
+    request = TrainingStartRequest.model_validate(
+        {
+            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "model": {"architecture": ModelArchitecture.ACT.value},
+            "compute": {"type": "runpod", "apiKey": "secret"},
+        }
+    )
+
+    result = asyncio.run(preflight_training(request))
+
+    assert result.ready is False
+    assert result.compute_backend == "runpod"
+    assert result.checks[0].status == "fail"
+
+
+def test_training_preflight_reports_missing_ssh_target_without_network() -> None:
+    request = TrainingStartRequest.model_validate(
+        {
+            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "model": {"architecture": ModelArchitecture.ACT.value},
+            "compute": {"type": "ssh", "sshUser": "ubuntu"},
+        }
+    )
+
+    result = asyncio.run(preflight_training(request))
+
+    assert result.ready is False
+    assert result.compute_backend == "ssh"
+    assert result.checks[0].name == "ssh_config"
+
+
+def test_training_launch_contract_maps_ssh_compute_config() -> None:
+    request = TrainingStartRequest.model_validate(
+        {
+            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "model": {"architecture": ModelArchitecture.ACT.value},
+            "compute": {
+                "type": "ssh",
+                "sshHost": "203.0.113.10",
+                "sshUser": "ubuntu",
+                "sshPort": 2222,
+                "sshKeyPath": "~/.ssh/robotops",
+                "remoteOutputDir": "/scratch/robotops",
+                "dockerImage": "urdf-ops:training",
+                "dockerArgs": "--shm-size 8g",
+                "device": "cuda",
+            },
+        }
+    )
+
+    contract = build_training_launch_contract(
+        request,
+        job_id=TEST_JOB_ID,
+        lerobot_python_path=Path("/tmp/python"),
+    )
+
+    assert contract.compute_config["type"] == "ssh"
+    assert contract.compute_config["host"] == "203.0.113.10"
+    assert contract.compute_config["user"] == "ubuntu"
+    assert contract.compute_config["port"] == 2222
+    assert contract.compute_config["key_path"] == "~/.ssh/robotops"
+    assert contract.compute_config["output_dir"] == "/scratch/robotops"
+    assert contract.compute_config["docker_image"] == "urdf-ops:training"
+    assert contract.compute_config["docker_args"] == "--shm-size 8g"
+    assert contract.compute_config["use_gpu"] is True
+
+
+def test_training_artifacts_list_uses_compute_backend(tmp_path: Path) -> None:
+    compute_job_id = "local_artifacts"
+    job_dir = tmp_path / compute_job_id
+    job_dir.mkdir()
+    artifact_path = job_dir / "final_model.safetensors"
+    artifact_path.write_text("model")
+
+    training_service._jobs[TEST_JOB_ID] = {
+        "compute_job_id": compute_job_id,
+        "compute_backend": "local",
+        "output_dir": str(tmp_path),
+        "status": JobStatus.COMPLETED,
+    }
+
+    try:
+        result = asyncio.run(get_job_artifacts(TEST_JOB_ID))
+    finally:
+        training_service._jobs.pop(TEST_JOB_ID, None)
+
+    assert result["jobId"] == TEST_JOB_ID
+    assert result["total"] == 1
+    assert result["artifacts"][0]["name"] == "final_model.safetensors"
+
+
+def test_training_metrics_endpoint_uses_history_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    async def noop_ensure_jobs_loaded() -> None:
+        return None
+
+    compute_job_id = "local_metrics"
+    job_dir = tmp_path / compute_job_id
+    job_dir.mkdir()
+    (job_dir / "metrics.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "step": 1,
+                        "epoch": 0,
+                        "timestamp": "2026-06-27T10:00:00",
+                        "loss": 0.5,
+                        "learning_rate": 0.001,
+                        "status": "running",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "step": 2,
+                        "epoch": 0,
+                        "timestamp": "2026-06-27T10:00:01",
+                        "loss": 0.25,
+                        "learning_rate": 0.001,
+                        "status": "running",
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    )
+
+    monkeypatch.setattr(training_service, "_ensure_jobs_loaded", noop_ensure_jobs_loaded)
+    training_service._jobs[TEST_JOB_ID] = {
+        "compute_job_id": compute_job_id,
+        "compute_backend": "local",
+        "output_dir": str(tmp_path),
+        "status": JobStatus.RUNNING,
+    }
+
+    try:
+        result = asyncio.run(training_api.get_training_metrics(TEST_JOB_ID))
+    finally:
+        training_service._jobs.pop(TEST_JOB_ID, None)
+
+    assert result["jobId"] == TEST_JOB_ID
+    assert result["lastStep"] == 2
+    assert result["lastEpoch"] == 0
+    assert [point["value"] for point in result["metrics"]["loss"]] == [0.5, 0.25]
+    assert [point["step"] for point in result["metrics"]["learning_rate"]] == [1, 2]
+    assert "status" not in result["metrics"]
 
 
 def test_training_launch_contract_rejects_missing_dataset_repo() -> None:

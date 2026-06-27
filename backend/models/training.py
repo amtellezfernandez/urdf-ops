@@ -64,6 +64,7 @@ class ComputeType(str, Enum):
     """Compute backend for training."""
 
     LOCAL = "local"
+    SSH = "ssh"
     MODAL = "modal"
     RUNPOD = "runpod"
     MACRODATA = "macrodata"
@@ -138,6 +139,11 @@ class TrainingParams(TrainingApiModel):
     batch_size: int = Field(default=32, ge=1, description="Batch size")
     learning_rate: float = Field(default=1e-4, gt=0, description="Learning rate")
     epochs: int = Field(default=100, ge=1, description="Number of epochs")
+    max_steps: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Optional hard limit on optimizer steps for bounded smoke runs",
+    )
     seed: int = Field(default=42, description="Random seed")
 
     # Optimization
@@ -242,6 +248,23 @@ class ComputeConfig(TrainingApiModel):
         default=4.0,
         description="Maximum training duration",
     )
+    ssh_host: Optional[str] = Field(default=None, description="SSH host or IP for remote Docker training")
+    ssh_user: Optional[str] = Field(default=None, description="SSH username")
+    ssh_port: int = Field(default=22, ge=1, le=65535, description="SSH port")
+    ssh_key_path: Optional[str] = Field(
+        default=None,
+        description="Path to SSH private key on the URDF Ops backend machine",
+    )
+    remote_output_dir: str = Field(
+        default="/tmp/robotops-outputs",
+        description="Remote artifact output directory",
+    )
+    docker_image: str = Field(
+        default="urdf-ops:training",
+        description="Remote trainer Docker image",
+    )
+    docker_args: Optional[str] = Field(default=None, description="Additional docker run arguments")
+    ssh_options: Optional[str] = Field(default=None, description="Additional ssh/scp options")
 
 
 # ============================================================================
@@ -351,6 +374,28 @@ class TrainingStartResponse(TrainingApiModel):
     lineage: Optional[TrainingLineage] = Field(
         default=None, description="Training lineage"
     )
+
+
+class TrainingPreflightCheck(TrainingApiModel):
+    """Single training preflight check result."""
+
+    name: str = Field(description="Check identifier")
+    label: str = Field(description="Human-readable check label")
+    status: Literal["pass", "warn", "fail"] = Field(description="Check status")
+    message: str = Field(description="Check result message")
+    details: Dict[str, Any] = Field(default_factory=dict, description="Structured check details")
+
+
+class TrainingPreflightResponse(TrainingApiModel):
+    """Response for validating a training launch before starting it."""
+
+    compute_backend: str = Field(description="Requested compute backend")
+    device: str = Field(description="Requested training device")
+    ready: bool = Field(description="Whether training can be launched")
+    can_train_locally: bool = Field(description="Whether local/backend compute is usable")
+    cloud_required: bool = Field(description="Whether this request requires remote/cloud compute")
+    recommendation: str = Field(description="Next action recommendation")
+    checks: List[TrainingPreflightCheck] = Field(default_factory=list)
 
 
 class TrainingStatusResponse(TrainingApiModel):

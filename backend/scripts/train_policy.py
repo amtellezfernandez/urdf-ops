@@ -33,8 +33,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+# Support direct execution with `python backend/scripts/train_policy.py`.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import numpy as np
 import torch
+
+from backend.services.training_policy_compat import normalize_policy_id, prepare_policy_overrides
 
 logging.basicConfig(
     level=logging.INFO,
@@ -129,19 +136,38 @@ def write_progress(
         json.dump(progress, f, indent=2)
 
 
+def append_metrics(
+    job_dir: Path,
+    step: int,
+    epoch: int,
+    metrics: Dict[str, Any],
+) -> None:
+    """Append a metrics snapshot for charting and log replay."""
+    entry = {
+        "step": step,
+        "epoch": epoch,
+        "timestamp": datetime.now().isoformat(),
+        **metrics,
+    }
+
+    metrics_file = job_dir / "metrics.jsonl"
+    with open(metrics_file, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
 def get_policy_config_class(architecture: str):
     """Get the config class for a given policy architecture."""
-    normalized_architecture = architecture.replace("-", "_")
-    if normalized_architecture == "act":
+    architecture = normalize_policy_id(architecture)
+    if architecture == "act":
         from lerobot.policies import ACTConfig
         return ACTConfig
-    elif normalized_architecture in {"diffusion", "diffusion_policy"}:
+    elif architecture == "diffusion":
         from lerobot.policies import DiffusionConfig
         return DiffusionConfig
-    elif normalized_architecture == "tdmpc":
+    elif architecture == "tdmpc":
         from lerobot.policies import TDMPCConfig
         return TDMPCConfig
-    elif normalized_architecture in {"vqbet", "vq_bet"}:
+    elif architecture == "vqbet":
         from lerobot.policies import VQBeTConfig
         return VQBeTConfig
     else:
@@ -150,17 +176,17 @@ def get_policy_config_class(architecture: str):
 
 def get_policy_class(architecture: str):
     """Get the policy class for a given architecture."""
-    normalized_architecture = architecture.replace("-", "_")
-    if normalized_architecture == "act":
+    architecture = normalize_policy_id(architecture)
+    if architecture == "act":
         from lerobot.policies.act.modeling_act import ACTPolicy
         return ACTPolicy
-    elif normalized_architecture in {"diffusion", "diffusion_policy"}:
+    elif architecture == "diffusion":
         from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
         return DiffusionPolicy
-    elif normalized_architecture == "tdmpc":
+    elif architecture == "tdmpc":
         from lerobot.policies.tdmpc.modeling_tdmpc import TDMPCPolicy
         return TDMPCPolicy
-    elif normalized_architecture in {"vqbet", "vq_bet"}:
+    elif architecture == "vqbet":
         from lerobot.policies.vqbet.modeling_vqbet import VQBeTPolicy
         return VQBeTPolicy
     else:
@@ -351,7 +377,7 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
         raise ValueError(f"Invalid dataset config: {dataset_config}")
 
     # Determine architecture and device
-    architecture = model_config.get("architecture", "act")
+    architecture = normalize_policy_id(model_config.get("architecture", "act"))
     policy_overrides = model_config.get("config", {})
     device_str = config.get("device", "cuda" if torch.cuda.is_available() else "cpu")
 
@@ -359,6 +385,7 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
 
     # Get policy config class
     PolicyConfigClass = get_policy_config_class(architecture)
+    policy_overrides = prepare_policy_overrides(PolicyConfigClass, policy_overrides)
 
     # Create policy config
     policy_cfg = PolicyConfigClass(
@@ -371,6 +398,8 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
     # Create dataset config for LeRobot
     ds_cfg = DatasetConfig(repo_id=repo_id)
 
+    requested_step_limit = training_config.get("max_steps") or training_config.get("steps")
+
     # Create training pipeline config with policy
     train_cfg = TrainPipelineConfig(
         dataset=ds_cfg,
@@ -378,7 +407,7 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
         output_dir=job_dir,
         batch_size=training_config.get("batch_size", 8),
         num_workers=training_config.get("num_workers", 4),
-        steps=training_config.get("steps", training_config.get("epochs", 100) * 1000),
+        steps=requested_step_limit or training_config.get("epochs", 100) * 1000,
     )
 
     # =========================================================================
@@ -403,7 +432,7 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
     # Optimizer
     learning_rate = training_config.get("learning_rate", 1e-5)
     weight_decay = training_config.get("weight_decay", 1e-4)
-    grad_clip_norm = training_config.get("grad_clip_norm", 10.0)
+    grad_clip_norm = training_config.get("max_grad_norm", training_config.get("grad_clip_norm", 10.0))
 
     optimizer = torch.optim.AdamW(
         policy.parameters(),
@@ -426,10 +455,17 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
     # Calculate total steps
     total_epochs = training_config.get("epochs", 1)
     steps_per_epoch = len(dataloader)
-    total_steps = total_epochs * steps_per_epoch
+    full_total_steps = total_epochs * steps_per_epoch
+    total_steps = (
+        min(full_total_steps, int(requested_step_limit))
+        if requested_step_limit
+        else full_total_steps
+    )
 
     logger.info(f"Training config: {total_epochs} epochs, {steps_per_epoch} steps/epoch, batch_size={batch_size}")
-    logger.info(f"Total steps: {total_steps}")
+    if requested_step_limit:
+        logger.info(f"Max steps enabled: {requested_step_limit} (full epoch plan would be {full_total_steps})")
+    logger.info(f"Total optimizer steps: {total_steps}")
 
     # =========================================================================
     # 4. Training loop
@@ -440,11 +476,17 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
     global_step = 0
 
     for epoch in range(total_epochs):
+        if global_step >= total_steps:
+            break
+
         policy.train()
         epoch_loss = 0.0
         epoch_steps = 0
 
         for step, batch in enumerate(dataloader):
+            if global_step >= total_steps:
+                break
+
             # Move batch to device
             batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
@@ -481,6 +523,12 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
                 total_steps=total_steps,
                 metrics=metrics_dict,
             )
+            append_metrics(
+                job_dir=job_dir,
+                step=global_step,
+                epoch=epoch,
+                metrics=metrics_dict,
+            )
 
             # Log metrics to experiment tracker (real-time)
             if tracker:
@@ -500,6 +548,9 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
                     f"Epoch {epoch + 1}/{total_epochs} - Step {step + 1}/{steps_per_epoch} - "
                     f"Loss: {loss_val:.4f} - Avg: {epoch_loss / epoch_steps:.4f}"
                 )
+
+        if epoch_steps == 0:
+            break
 
         # Epoch summary
         avg_loss = epoch_loss / epoch_steps

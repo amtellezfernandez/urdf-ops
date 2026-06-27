@@ -22,11 +22,28 @@ const TEST_COMPUTE_CONFIGS = {
     timeoutHours: 4,
     apiKey: "secret",
   } satisfies ComputeConfig,
+  ssh: {
+    type: "ssh",
+    device: "cuda",
+    useSpot: true,
+    timeoutHours: 4,
+    sshHost: "203.0.113.10",
+    sshUser: "ubuntu",
+  } satisfies ComputeConfig,
+  sshMissingHost: {
+    type: "ssh",
+    device: "cuda",
+    useSpot: true,
+    timeoutHours: 4,
+    sshUser: "ubuntu",
+  } satisfies ComputeConfig,
 } as const;
 
 describe("training compute policy", () => {
-  it("allows only the local production backend", () => {
+  it("allows local and configured remote Docker production backends", () => {
     expect(canUseConfiguredComputeBackend(TEST_COMPUTE_CONFIGS.local)).toBe(true);
+    expect(canUseConfiguredComputeBackend(TEST_COMPUTE_CONFIGS.ssh)).toBe(true);
+    expect(canUseConfiguredComputeBackend(TEST_COMPUTE_CONFIGS.sshMissingHost)).toBe(false);
     expect(canUseConfiguredComputeBackend(TEST_COMPUTE_CONFIGS.runpod)).toBe(false);
   });
 
@@ -49,5 +66,11 @@ describe("training compute policy", () => {
         localRuntimeAvailable: false,
       }),
     ).toBe(false);
+    expect(
+      canStartWithTrainingCompute({
+        computeConfig: TEST_COMPUTE_CONFIGS.ssh,
+        localRuntimeAvailable: false,
+      }),
+    ).toBe(true);
   });
 });

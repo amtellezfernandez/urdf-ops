@@ -18,6 +18,7 @@ export const TRAINING_COMPUTE_PARAMS = {
     "Cloud training runners are disabled in this build. Use local training until provider execution, log streaming, artifact download, and cancellation are wired.",
   cloudUnavailableBadge: "Disabled",
   localReadyBadge: "Available",
+  remoteReadyBadge: "BYOC",
   localRuntimeReviewMessage: "Local runtime is checked before launch.",
   selectedComputeLabel: "Selected Compute",
   pollStatusIntervalMs: 2000,
@@ -25,6 +26,7 @@ export const TRAINING_COMPUTE_PARAMS = {
 
 export const TRAINING_COMPUTE_BACKEND_NAMES: Record<TrainingComputeBackendId, string> = {
   local: "Local GPU",
+  ssh: "Remote Docker machine",
   modal: "Modal",
   runpod: "RunPod",
   macrodata: "Macrodata Cloud",
@@ -37,6 +39,14 @@ export const TRAINING_COMPUTE_BACKENDS: readonly TrainingComputeBackendOption[] 
     selectableType: "local",
     name: TRAINING_COMPUTE_BACKEND_NAMES.local,
     description: "Train on this computer with the local LeRobot runtime.",
+    enabled: true,
+    productionReady: true,
+  },
+  {
+    id: "ssh",
+    selectableType: "ssh",
+    name: TRAINING_COMPUTE_BACKEND_NAMES.ssh,
+    description: "Train on a user-provided SSH machine with Docker and the trainer image.",
     enabled: true,
     productionReady: true,
   },

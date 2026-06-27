@@ -2,6 +2,7 @@ import { API_BASE_URL } from "@/shared/config/api";
 import type {
   ComputeInstancesResponse,
   TrainingComputeBackendsResponse,
+  TrainingPreflightResponse,
   TrainingRuntimeCheckResponse,
 } from "./types";
 
@@ -25,6 +26,18 @@ export async function fetchTrainingComputeInstances(): Promise<ComputeInstancesR
   const response = await fetch(`${API_BASE_URL}/training/compute/instances`);
   if (!response.ok) {
     throw new Error("Failed to fetch training compute instances");
+  }
+  return response.json();
+}
+
+export async function runTrainingPreflight(payload: unknown): Promise<TrainingPreflightResponse> {
+  const response = await fetch(`${API_BASE_URL}/training/preflight`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to run training preflight");
   }
   return response.json();
 }

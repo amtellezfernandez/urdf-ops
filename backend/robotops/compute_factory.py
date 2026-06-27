@@ -25,11 +25,12 @@ from backend.robotops.compute.local_compute import LocalCompute
 from backend.robotops.compute.macrodata_compute import MacrodataCompute
 from backend.robotops.compute.modal_compute import ModalCompute
 from backend.robotops.compute.runpod_compute import RunPodCompute
+from backend.robotops.compute.ssh_compute import SSHDockerCompute
 
 logger = logging.getLogger(__name__)
 
 
-ComputeType = Literal["local", "modal", "runpod", "macrodata"]
+ComputeType = Literal["local", "ssh", "modal", "runpod", "macrodata"]
 
 SECRET_CACHE_FIELD_MARKERS = (
     "api_key",
@@ -102,6 +103,7 @@ class ComputeConfig(BaseModel):
 # Registry of available compute backends
 COMPUTE_REGISTRY: Dict[str, type] = {
     "local": LocalCompute,
+    "ssh": SSHDockerCompute,
     "modal": ModalCompute,
     "runpod": RunPodCompute,
     "macrodata": MacrodataCompute,
@@ -204,6 +206,22 @@ def get_compute(
     if compute_type == "local":
         if config.python_path:
             kwargs["python_path"] = config.python_path
+
+    elif compute_type == "ssh":
+        ssh_field_map = {
+            "ssh_host": "host",
+            "ssh_user": "user",
+            "ssh_port": "port",
+            "ssh_key_path": "key_path",
+            "remote_output_dir": "output_dir",
+            "docker_image": "docker_image",
+            "docker_args": "docker_args",
+            "ssh_options": "ssh_options",
+        }
+        for config_field, kwarg_field in ssh_field_map.items():
+            value = getattr(config, config_field, None)
+            if value:
+                kwargs[kwarg_field] = value
 
     elif compute_type == "modal":
         if config.api_key:
