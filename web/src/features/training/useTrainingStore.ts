@@ -21,7 +21,6 @@ import { canUseConfiguredComputeBackend } from "./trainingComputePolicy";
 // ============================================================================
 
 type TrainingStep =
-  | "dataset"
   | "model"
   | "training"
   | "tracker"
@@ -92,7 +91,6 @@ const defaultComputeConfig: ComputeConfig = { ...DEFAULT_COMPUTE_CONFIG };
 // ============================================================================
 
 const STEP_ORDER: TrainingStep[] = [
-  "dataset",
   "model",
   "training",
   "tracker",
@@ -107,7 +105,7 @@ const STEP_ORDER: TrainingStep[] = [
 export const useTrainingStore = create<TrainingState>((set, get) => ({
   // Initial state
   isDialogOpen: false,
-  currentStep: "dataset",
+  currentStep: "model",
 
   datasetConfig: null,
   modelConfig: null,
@@ -124,7 +122,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   error: null,
 
   // Dialog actions
-  openDialog: () => set({ isDialogOpen: true, currentStep: "dataset" }),
+  openDialog: () => set({ isDialogOpen: true, currentStep: "model" }),
   closeDialog: () => {
     const { pollIntervalId } = get();
     if (pollIntervalId) {
@@ -191,15 +189,15 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
 
   // Reset
   resetConfig: () =>
-    set({
-      datasetConfig: null,
+    set((state) => ({
+      datasetConfig: state.datasetConfig,
       modelConfig: null,
       trainingParams: { ...defaultTrainingParams },
       trackerConfig: { ...defaultTrackerConfig },
       computeConfig: { ...defaultComputeConfig },
-      currentStep: "dataset",
+      currentStep: "model",
       error: null,
-    }),
+    })),
 
   resetAll: () => {
     const { pollIntervalId } = get();
@@ -208,7 +206,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     }
     set({
       isDialogOpen: false,
-      currentStep: "dataset",
+      currentStep: "model",
       datasetConfig: null,
       modelConfig: null,
       trainingParams: { ...defaultTrainingParams },

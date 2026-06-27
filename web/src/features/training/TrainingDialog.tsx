@@ -9,7 +9,6 @@ import { toast } from "sonner";
 
 import { Button } from "@/shared/ui/button";
 import { useTrainingStore, selectCanStartTraining, selectIsJobRunning } from "./useTrainingStore";
-import { DatasetSelector } from "./DatasetSelector";
 import { ModelSelector } from "./ModelSelector";
 import { HyperparameterForm } from "./HyperparameterForm";
 import { TrackerConfig } from "./TrackerConfig";
@@ -24,13 +23,14 @@ import { fetchTrainingRuntimeCheck } from "./trainingApi";
 import { buildTrainingPayload } from "./buildTrainingPayload";
 
 const STEP_TITLES = {
-  dataset: "Select Dataset",
   model: "Choose Model",
   training: "Training Parameters",
   tracker: "Experiment Tracking",
   compute: "Compute Backend",
   review: "Review & Launch",
 };
+
+const STEP_ORDER = Object.keys(STEP_TITLES) as Array<keyof typeof STEP_TITLES>;
 
 export function TrainingDialog() {
   const {
@@ -199,8 +199,6 @@ export function TrainingDialog() {
   // Check if step is valid for navigation
   const canProceed = (step: string): boolean => {
     switch (step) {
-      case "dataset":
-        return datasetConfig !== null;
       case "model":
         return modelConfig !== null;
       default:
@@ -266,7 +264,7 @@ export function TrainingDialog() {
               {STEP_TITLES[currentStep]}
             </h2>
             <p className="text-xs text-muted-foreground">
-              Step {Object.keys(STEP_TITLES).indexOf(currentStep) + 1} of {Object.keys(STEP_TITLES).length}
+              Step {STEP_ORDER.indexOf(currentStep) + 1} of {STEP_ORDER.length}
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={closeDialog}>
@@ -276,15 +274,15 @@ export function TrainingDialog() {
 
         {/* Step indicator */}
         <div className="flex gap-1 px-4 py-2 border-b bg-muted/30">
-          {Object.keys(STEP_TITLES).map((step, index) => (
+          {STEP_ORDER.map((step, index) => (
             <button
               key={step}
               onClick={() => setStep(step as keyof typeof STEP_TITLES)}
-              disabled={index > 0 && !canProceed(Object.keys(STEP_TITLES)[index - 1])}
+              disabled={index > 0 && !canProceed(STEP_ORDER[index - 1])}
               className={`flex-1 h-1.5 rounded-full transition-colors ${
                 step === currentStep
-                  ? "bg-primary"
-                  : index < Object.keys(STEP_TITLES).indexOf(currentStep)
+                ? "bg-primary"
+                : index < STEP_ORDER.indexOf(currentStep)
                   ? "bg-primary/50"
                   : "bg-muted"
               }`}
@@ -300,7 +298,6 @@ export function TrainingDialog() {
             </div>
           )}
 
-          {currentStep === "dataset" && <DatasetSelector />}
           {currentStep === "model" && <ModelSelector />}
           {currentStep === "training" && <HyperparameterForm />}
           {currentStep === "tracker" && <TrackerConfig />}
@@ -313,7 +310,7 @@ export function TrainingDialog() {
           <Button
             variant="outline"
             onClick={prevStep}
-            disabled={currentStep === "dataset"}
+            disabled={currentStep === "model"}
           >
             <ChevronLeft className="w-4 h-4 mr-1" />
             Back

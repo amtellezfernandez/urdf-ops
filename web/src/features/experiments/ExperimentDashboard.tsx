@@ -208,7 +208,12 @@ export function ExperimentDashboard({
   const setIsLoading = useExperimentStore((state) => state.setIsLoading);
   const setError = useExperimentStore((state) => state.setError);
   const openTrainingDialog = useTrainingStore((state) => state.openDialog);
+  const setTrainingStep = useTrainingStore((state) => state.setStep);
+  const datasetConfig = useTrainingStore((state) => state.datasetConfig);
   const viewCopy = VIEW_COPY[activeView];
+  const canConfigureTraining = Boolean(datasetConfig) && (
+    datasetConfig?.episodes === undefined || datasetConfig.episodes.length > 0
+  );
   const {
     data: jobsData,
     error: jobsError,
@@ -247,6 +252,12 @@ export function ExperimentDashboard({
     };
   }, [hasActiveJobs, reset]);
 
+  const handleConfigureTraining = () => {
+    if (!canConfigureTraining) return;
+    openTrainingDialog();
+    setTrainingStep("model");
+  };
+
   return (
     <div className={EXPERIMENT_DASHBOARD_CLASS_NAMES.shell}>
       {/* Header */}
@@ -257,9 +268,14 @@ export function ExperimentDashboard({
             {viewCopy.subtitle}
           </p>
         </div>
-        <Button onClick={openTrainingDialog} className={EXPERIMENT_DASHBOARD_CLASS_NAMES.actionButton}>
+        <Button
+          onClick={handleConfigureTraining}
+          className={EXPERIMENT_DASHBOARD_CLASS_NAMES.actionButton}
+          disabled={!canConfigureTraining}
+          title={canConfigureTraining ? "Configure training" : "Select a dataset first"}
+        >
           <Play className="mr-1.5 h-3.5 w-3.5" />
-          New training
+          {canConfigureTraining ? "Configure training" : "Select dataset"}
         </Button>
       </div>
 

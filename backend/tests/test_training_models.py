@@ -106,13 +106,18 @@ def _runpod_cloud_start_request() -> TrainingStartRequest:
 def test_training_start_request_accepts_ui_camel_case_payloads() -> None:
     request = TrainingStartRequest.model_validate(
         {
-            "dataset": {"source": "huggingface", "repoId": TEST_DATASET_REPO_ID},
+            "dataset": {
+                "source": "huggingface",
+                "repoId": TEST_DATASET_REPO_ID,
+                "episodes": [0, 2],
+            },
             "model": {"architecture": ModelArchitecture.DIFFUSION_POLICY.value},
             "training": {"batchSize": TEST_BATCH_SIZE, "maxSteps": TEST_MAX_STEPS},
         }
     )
 
     assert request.dataset.repo_id == TEST_DATASET_REPO_ID
+    assert request.dataset.episodes == [0, 2]
     assert request.model.architecture == ModelArchitecture.DIFFUSION_POLICY.value
     assert request.training.batch_size == TEST_BATCH_SIZE
     assert request.training.max_steps == TEST_MAX_STEPS
@@ -133,7 +138,7 @@ def test_training_responses_serialize_to_ui_camel_case() -> None:
 def test_training_service_internal_dump_keeps_script_snake_case() -> None:
     request = TrainingStartRequest.model_validate(
         {
-            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "dataset": {"repoId": TEST_DATASET_REPO_ID, "episodes": [0, 2]},
             "training": {"batchSize": TEST_BATCH_SIZE, "maxSteps": TEST_MAX_STEPS},
         }
     )
@@ -142,6 +147,7 @@ def test_training_service_internal_dump_keeps_script_snake_case() -> None:
     training_config = _dump_internal_model(request.training)
 
     assert dataset_config["repo_id"] == TEST_DATASET_REPO_ID
+    assert dataset_config["episodes"] == [0, 2]
     assert "repoId" not in dataset_config
     assert training_config["batch_size"] == TEST_BATCH_SIZE
     assert training_config["max_steps"] == TEST_MAX_STEPS

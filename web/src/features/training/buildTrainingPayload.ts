@@ -36,6 +36,7 @@ export function buildTrainingPayload({
       repo_id: datasetConfig.repoId,
       local_path: datasetConfig.localPath,
       version: datasetConfig.version,
+      episodes: datasetConfig.episodes,
     },
     model: {
       architecture: modelConfig.architecture,

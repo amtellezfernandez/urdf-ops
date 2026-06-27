@@ -42,6 +42,7 @@ def test_lereal_world_model_runner_builds_local_dataset_stage1_command(
             "dataset": {
                 "source": "local",
                 "local_path": str(dataset_path),
+                "episodes": [0, 2],
             },
             "model": {
                 "architecture": "lereal_world_model",
@@ -78,6 +79,7 @@ def test_lereal_world_model_runner_builds_local_dataset_stage1_command(
     assert "data.dataset.repo_id=local/urdf-ops-dataset" in stage1_command
     assert "data.dataset.image_key=observation.images.up" in stage1_command
     assert "data.dataset.image_key2=null" in stage1_command
+    assert "data.dataset.episodes=[0,2]" in stage1_command
     assert "data.dataset.frameskip=5" in stage1_command
     assert "wm.action_dim=6" in stage1_command
     assert "trainer.max_epochs=1" in stage1_command

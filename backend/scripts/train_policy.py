@@ -341,6 +341,24 @@ def _as_optional_path_string(value: Any) -> str | None:
     return str(Path(string_value).expanduser())
 
 
+def _as_episode_indices(value: Any) -> list[int]:
+    if not isinstance(value, list):
+        return []
+    episodes: list[int] = []
+    for item in value:
+        try:
+            episode_index = int(item)
+        except (TypeError, ValueError):
+            continue
+        if episode_index >= 0:
+            episodes.append(episode_index)
+    return sorted(dict.fromkeys(episodes))
+
+
+def _as_hydra_int_list(values: list[int]) -> str:
+    return "[" + ",".join(str(value) for value in values) + "]"
+
+
 def _lwm_write_progress(
     job_dir: Path,
     *,
@@ -502,6 +520,10 @@ def _lwm_dataset_overrides(
         overrides.append("data.dataset.image_key2=null")
         if stage == LEREAL_WORLD_MODEL_STAGE_STAGE2:
             overrides.append(f"data.dataset.image_keys=[{image_key}]")
+
+    episodes = _as_episode_indices(dataset_config.get("episodes"))
+    if episodes:
+        overrides.append(f"data.dataset.episodes={_as_hydra_int_list(episodes)}")
 
     if stage == LEREAL_WORLD_MODEL_STAGE_STAGE1:
         action_key = _as_optional_string(runtime_config.get("action_key"))
@@ -839,7 +861,19 @@ def train_with_lerobot(config: Dict[str, Any], job_dir: Path) -> None:
     )
 
     # Create dataset config for LeRobot
-    ds_cfg = DatasetConfig(repo_id=repo_id)
+    dataset_kwargs: Dict[str, Any] = {"repo_id": repo_id}
+    episodes = _as_episode_indices(dataset_config.get("episodes"))
+    if episodes:
+        dataset_kwargs["episodes"] = episodes
+    try:
+        ds_cfg = DatasetConfig(**dataset_kwargs)
+    except TypeError as exc:
+        if episodes:
+            raise RuntimeError(
+                "Selected episode subsets require a LeRobot DatasetConfig "
+                "version that supports the episodes field."
+            ) from exc
+        raise
 
     requested_step_limit = training_config.get("max_steps") or training_config.get("steps")
 
