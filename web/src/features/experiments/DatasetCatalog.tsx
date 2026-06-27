@@ -11,6 +11,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  X,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -469,6 +470,12 @@ export function DatasetCatalog({ initialDataset }: DatasetCatalogProps) {
   const canUseDirectSelection = selectedSources.length === 1 && !hasEmptySubset;
   const canMaterializeMix = selectedSources.length > 1 && !hasEmptySubset;
   const canConfigureTraining = canUseDirectSelection || Boolean(materializedDataset);
+  const mixBusy = mixStatus.status === "queued" || mixStatus.status === "running";
+  const selectedSourceLabel = `${selectedSourceCount} source${selectedSourceCount === 1 ? "" : "s"}`;
+  const selectedScopeLabel =
+    selectedSourceCount === 0
+      ? "No sources selected"
+      : `${selectedSourceLabel}${selectedEpisodeSubsetCount > 0 ? `, ${selectedEpisodeSubsetCount} scoped` : ""}`;
   const catalogErrorMessage = error instanceof Error ? error.message : "Dataset catalog is unavailable";
   const catalogErrorHint =
     catalogErrorMessage.includes(":8000/") && catalogErrorMessage.includes("returned 404")
@@ -518,6 +525,11 @@ export function DatasetCatalog({ initialDataset }: DatasetCatalogProps) {
   const resetMaterializedMix = () => {
     setMaterializedDataset(null);
     setMixStatus({ status: "idle" });
+  };
+
+  const clearSelection = () => {
+    resetMaterializedMix();
+    setSelectedSources([]);
   };
 
   const updateSelectedSource = (source: TrainingSetSource, updater: (current: TrainingSetSource) => TrainingSetSource) => {
@@ -651,180 +663,41 @@ export function DatasetCatalog({ initialDataset }: DatasetCatalogProps) {
   };
 
   return (
-    <div className="grid min-h-full gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
-      <aside className="space-y-3">
-        <section className="rounded-md border border-border/60 bg-background/95 shadow-sm">
-          <div className="border-b border-border/60 px-3 py-3">
-            <div className="flex items-center gap-2">
+    <div className="space-y-4">
+      <section className="sticky top-0 z-10 rounded-md border border-border/60 bg-background/95 p-3 shadow-sm backdrop-blur">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
               <div className={EXPERIMENT_DASHBOARD_CLASS_NAMES.iconTile}>
                 <Layers3 className="h-4 w-4 text-muted-foreground" />
               </div>
-              <div>
-                <h2 className="text-sm font-medium">Training set</h2>
-                <p className="text-xs text-muted-foreground">
-                  {selectedSourceCount} sources, {selectedEpisodeSubsetCount} scoped
+              <div className="min-w-0">
+                <h2 className="text-sm font-medium">Dataset sources</h2>
+                <p className="truncate text-xs text-muted-foreground">
+                  {selectedScopeLabel}
+                  {materializedDataset ? " - mixed set ready" : ""}
                 </p>
               </div>
             </div>
-          </div>
-          <div className="space-y-3 p-3">
-            {selectedSources.length > 0 ? (
-              <div className="space-y-2">
-                {selectedSources.map((source) => (
-                  <div key={source.id} className="rounded-md border border-border/60 bg-muted/15 p-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium" title={source.name}>
-                          {source.name}
-                        </p>
-                        <p className="truncate font-mono text-[11px] text-muted-foreground" title={source.value}>
-                          {source.value}
-                        </p>
-                      </div>
-                      <Badge className="border-border/60 bg-background text-[11px] font-normal">
-                        {selectedEpisodeLabel(source)}
-                      </Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Choose one or more sources from the tables.</p>
-            )}
 
-            {hasEmptySubset && (
-              <p className="text-xs text-destructive">
-                A source has zero episodes selected. Use the whole source or select at least one episode.
-              </p>
-            )}
-
-            {selectedSources.length > 1 && (
-              <div className="rounded-md border border-border/60 bg-muted/10 p-2">
-                <div className="flex items-start gap-2">
-                  <GitBranchPlus className="mt-0.5 h-4 w-4 text-muted-foreground" />
-                  <div>
-                    <p className="text-xs font-medium">Mixed training set</p>
-                    <p className="text-xs text-muted-foreground">
-                      Materialize the selected sources into one local LeRobot dataset before training.
-                    </p>
-                    {mixStatus.status !== "idle" && (
-                      <p className={cn("mt-1 text-xs", mixStatus.status === "failed" ? "text-destructive" : "text-muted-foreground")}>
-                        {mixStatus.message || mixStatus.status}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <Button
-                  type="button"
-                  variant={materializedDataset ? "secondary" : "outline"}
-                  size="sm"
-                  className="mt-2 h-8 w-full text-xs"
-                  onClick={materializeMix}
-                  disabled={!canMaterializeMix || mixStatus.status === "queued" || mixStatus.status === "running"}
-                >
-                  {mixStatus.status === "queued" || mixStatus.status === "running" ? (
-                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  ) : materializedDataset ? (
-                    <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
-                  ) : (
-                    <GitBranchPlus className="mr-1.5 h-3.5 w-3.5" />
-                  )}
-                  {materializedDataset ? "Mixed dataset ready" : "Materialize mix"}
-                </Button>
-              </div>
-            )}
-
-            <Button
-              type="button"
-              className={cn(EXPERIMENT_DASHBOARD_CLASS_NAMES.trainButton, "w-full")}
-              onClick={configureTraining}
-              disabled={!canConfigureTraining}
-            >
-              <Play className="mr-1.5 h-3.5 w-3.5" />
-              Configure training
-            </Button>
-          </div>
-        </section>
-
-        <section className="rounded-md border border-border/60 bg-background/95 shadow-sm">
-          <form className="space-y-3 p-3" onSubmit={handleUseHuggingFace}>
-            <div className="flex items-center gap-2">
-              <div className={EXPERIMENT_DASHBOARD_CLASS_NAMES.iconTile}>
-                <Plus className="h-4 w-4 text-muted-foreground" />
+            <div className="grid grid-cols-3 gap-3 text-right text-xs">
+              <div>
+                <p className="text-muted-foreground">Sources</p>
+                <p className="font-semibold text-foreground">{localSources.length + hfSources.length}</p>
               </div>
               <div>
-                <label className="text-sm font-medium" htmlFor="hf-dataset-id">
-                  Add Hugging Face dataset
-                </label>
-                <p className="text-xs text-muted-foreground">Repo ID or dataset URL</p>
+                <p className="text-muted-foreground">Studio</p>
+                <p className="font-semibold text-foreground">{studioExportCount}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Selected</p>
+                <p className="font-semibold text-foreground">{selectedSourceCount}</p>
               </div>
             </div>
-            <Input
-              id="hf-dataset-id"
-              value={hfDatasetId}
-              onChange={(event) => setHfDatasetId(event.target.value)}
-              placeholder="lerobot/pusht"
-              className="h-9 text-sm"
-            />
-            <div className="grid grid-cols-[1fr_auto] gap-2">
-              <Button type="submit" size="sm" className="h-8 text-xs" disabled={!normalizedHfDatasetId}>
-                Add to training set
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 px-2"
-                disabled={!normalizedHfDatasetId}
-                onClick={() => {
-                  window.open(`https://huggingface.co/datasets/${normalizedHfDatasetId}`, "_blank");
-                }}
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </form>
-        </section>
-
-        <section className="rounded-md border border-border/60 bg-background/95 p-3 shadow-sm">
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <p className="text-xs text-muted-foreground">Sources</p>
-              <p className="mt-1 text-lg font-semibold">{localSources.length + hfSources.length}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Studio</p>
-              <p className="mt-1 text-lg font-semibold">{studioExportCount}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Selected</p>
-              <p className="mt-1 text-lg font-semibold">{selectedSourceCount}</p>
-            </div>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mt-3 h-8 w-full text-xs"
-            onClick={() => refetch()}
-            disabled={isFetching}
-          >
-            <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", isFetching && "animate-spin")} />
-            Refresh local catalog
-          </Button>
-        </section>
-      </aside>
 
-      <div className="space-y-4">
-        <div className="rounded-md border border-border/60 bg-background/95 p-3 shadow-sm">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="text-sm font-medium">Dataset sources</h2>
-              <p className="text-xs text-muted-foreground">
-                Build a training set from Studio exports, local LeRobot roots, and Hugging Face repos.
-              </p>
-            </div>
-            <div className="relative w-full md:w-80">
+          <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
+            <div className="relative min-w-0 flex-1">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 value={query}
@@ -833,58 +706,173 @@ export function DatasetCatalog({ initialDataset }: DatasetCatalogProps) {
                 className="h-9 pl-9 text-sm"
               />
             </div>
+
+            <form className="flex min-w-0 gap-2 xl:w-[28rem]" onSubmit={handleUseHuggingFace}>
+              <Input
+                id="hf-dataset-id"
+                value={hfDatasetId}
+                onChange={(event) => setHfDatasetId(event.target.value)}
+                placeholder="Add HF repo or URL"
+                className="h-9 min-w-0 text-sm"
+              />
+              <Button type="submit" variant="outline" size="sm" className="h-9 text-xs" disabled={!normalizedHfDatasetId}>
+                <Plus className="h-3.5 w-3.5" />
+                Add
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 px-2"
+                disabled={!normalizedHfDatasetId}
+                title="Open on Hugging Face"
+                onClick={() => {
+                  window.open(`https://huggingface.co/datasets/${normalizedHfDatasetId}`, "_blank");
+                }}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Button>
+            </form>
+
+            <div className="flex flex-wrap gap-2 xl:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 px-2"
+                onClick={() => refetch()}
+                disabled={isFetching}
+                title="Refresh local catalog"
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
+              </Button>
+              {selectedSourceCount > 0 && (
+                <Button type="button" variant="ghost" size="sm" className="h-9 text-xs" onClick={clearSelection}>
+                  Clear
+                </Button>
+              )}
+              {selectedSources.length > 1 && (
+                <Button
+                  type="button"
+                  variant={materializedDataset ? "secondary" : "outline"}
+                  size="sm"
+                  className="h-9 text-xs"
+                  onClick={materializeMix}
+                  disabled={!canMaterializeMix || mixBusy}
+                >
+                  {mixBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : materializedDataset ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  ) : (
+                    <GitBranchPlus className="h-3.5 w-3.5" />
+                  )}
+                  {materializedDataset ? "Set built" : "Build set"}
+                </Button>
+              )}
+              {selectedSourceCount > 0 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-9 rounded-md bg-foreground px-3 text-xs text-background shadow-sm hover:bg-foreground/90"
+                  onClick={configureTraining}
+                  disabled={!canConfigureTraining}
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  New job
+                </Button>
+              )}
+            </div>
           </div>
+
+          {(selectedSources.length > 0 || hasEmptySubset || mixStatus.status !== "idle") && (
+            <div className="border-t border-border/60 pt-3">
+              {selectedSources.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {selectedSources.map((source) => (
+                    <div
+                      key={source.id}
+                      className="flex max-w-full items-center gap-2 rounded-md border border-border/60 bg-muted/15 px-2 py-1 text-xs"
+                    >
+                      <span className="truncate font-medium">{source.name}</span>
+                      <span className="text-muted-foreground">{selectedEpisodeLabel(source)}</span>
+                      <button
+                        type="button"
+                        className="rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                        aria-label={`Remove ${source.name}`}
+                        onClick={() => toggleSource(source)}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {hasEmptySubset && (
+                <p className="mt-2 text-xs text-destructive">
+                  One selected source has no episodes. Select at least one episode or use the whole source.
+                </p>
+              )}
+
+              {selectedSources.length > 1 && mixStatus.status !== "idle" && (
+                <p className={cn("mt-2 text-xs", mixStatus.status === "failed" ? "text-destructive" : "text-muted-foreground")}>
+                  {mixStatus.message || mixStatus.status}
+                </p>
+              )}
+            </div>
+          )}
         </div>
+      </section>
 
-        {isLoading && (
-          <div className="flex items-center justify-center rounded-md border border-border/60 bg-background/95 py-12">
-            <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
-          </div>
-        )}
+      {isLoading && (
+        <div className="flex items-center justify-center rounded-md border border-border/60 bg-background/95 py-12">
+          <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
+        </div>
+      )}
 
-        {!isLoading && error && (
-          <div className="rounded-md border border-border/60 bg-background/95 px-3 py-3 shadow-sm">
-            <p className="text-sm font-medium">Local catalog unavailable</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {catalogErrorMessage}. {catalogErrorHint} Hugging Face sources can still be added.
-            </p>
-          </div>
-        )}
+      {!isLoading && error && (
+        <div className="rounded-md border border-border/60 bg-background/95 px-3 py-3 shadow-sm">
+          <p className="text-sm font-medium">Local catalog unavailable</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {catalogErrorMessage}. {catalogErrorHint} Hugging Face sources can still be added.
+          </p>
+        </div>
+      )}
 
-        {!isLoading && (
-          <SourceTable
-            title="Studio and local datasets"
-            subtitle="LeRobot exports discovered from configured roots"
-            icon={<FolderOpen className="h-4 w-4 text-muted-foreground" />}
-            sources={localSources}
-            selectedSources={selectedSources}
-            query={query}
-            emptyTitle={error ? "No local datasets loaded" : "No local LeRobot datasets found"}
-            emptySubtitle={
-              !error && data?.roots?.length
-                ? data.roots.join(", ")
-                : "Recorded Studio episodes appear here after Studio writes local LeRobot exports."
-            }
-            onToggleSource={toggleSource}
-            onUseWholeSource={useWholeSource}
-            onToggleEpisode={toggleEpisode}
-          />
-        )}
-
+      {!isLoading && (
         <SourceTable
-          title="Hugging Face datasets"
-          subtitle="Repo IDs added to this Ops workspace"
-          icon={<Database className="h-4 w-4 text-muted-foreground" />}
-          sources={hfSources}
+          title="Studio and local datasets"
+          subtitle="LeRobot exports discovered from configured roots"
+          icon={<FolderOpen className="h-4 w-4 text-muted-foreground" />}
+          sources={localSources}
           selectedSources={selectedSources}
           query={query}
-          emptyTitle="No Hugging Face datasets added"
-          emptySubtitle="Use the Add Hugging Face dataset panel to add a repo ID or URL."
+          emptyTitle={error ? "No local datasets loaded" : "No local LeRobot datasets found"}
+          emptySubtitle={
+            !error && data?.roots?.length
+              ? data.roots.join(", ")
+              : "Recorded Studio episodes appear here after Studio writes local LeRobot exports."
+          }
           onToggleSource={toggleSource}
           onUseWholeSource={useWholeSource}
           onToggleEpisode={toggleEpisode}
         />
-      </div>
+      )}
+
+      <SourceTable
+        title="Hugging Face datasets"
+        subtitle="Repo IDs added to this Ops workspace"
+        icon={<Database className="h-4 w-4 text-muted-foreground" />}
+        sources={hfSources}
+        selectedSources={selectedSources}
+        query={query}
+        emptyTitle="No Hugging Face datasets added"
+        emptySubtitle="Add a repo ID or URL from the command bar."
+        onToggleSource={toggleSource}
+        onUseWholeSource={useWholeSource}
+        onToggleEpisode={toggleEpisode}
+      />
     </div>
   );
 }

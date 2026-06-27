@@ -4,14 +4,14 @@ export const URDF_OPS_PAGE_PARAMS = {
 
 export const URDF_OPS_PAGE_CLASS_NAMES = {
   sidebar:
-    "flex h-full flex-col border-r border-border/60 bg-background text-foreground transition-all",
+    "flex h-full shrink-0 flex-col border-r border-border/60 bg-background text-foreground transition-all",
   sidebarHeader:
-    "flex items-center justify-between border-b border-border/50 px-3 py-2",
+    "flex items-center justify-center border-b border-border/50 px-2 py-2 sm:justify-between sm:px-3",
   backButton:
-    "h-7 rounded-md bg-transparent px-2 text-muted-foreground hover:bg-muted/25 hover:text-foreground",
-  title: "truncate text-sm font-semibold text-foreground",
+    "h-8 w-8 rounded-md bg-transparent p-0 text-muted-foreground hover:bg-muted/25 hover:text-foreground sm:h-7 sm:w-auto sm:px-2",
+  title: "hidden truncate text-sm font-semibold text-foreground sm:block",
   navItem:
-    "flex w-full items-center gap-2 rounded-md border border-transparent px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/25 hover:text-foreground",
+    "flex w-full items-center justify-center gap-2 rounded-md border border-transparent px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/25 hover:text-foreground sm:justify-start",
   navItemActive:
     "bg-muted/35 text-foreground",
   navIcon:
@@ -20,5 +20,5 @@ export const URDF_OPS_PAGE_CLASS_NAMES = {
   collapsedNavButton:
     "h-8 w-full rounded-md bg-transparent text-muted-foreground hover:bg-muted/25 hover:text-foreground",
   collapseButton:
-    "h-7 w-7 rounded-md bg-transparent p-0 text-muted-foreground hover:bg-muted/25 hover:text-foreground",
+    "hidden h-7 w-7 rounded-md bg-transparent p-0 text-muted-foreground hover:bg-muted/25 hover:text-foreground sm:flex",
 } as const;

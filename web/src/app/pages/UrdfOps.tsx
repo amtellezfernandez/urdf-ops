@@ -118,7 +118,7 @@ function NavItem({
       >
         <Icon className="h-4 w-4" />
       </span>
-      {label}
+      <span className="hidden sm:inline">{label}</span>
     </button>
   );
 }
@@ -137,13 +137,13 @@ function Sidebar({
   const logoUrl = (import.meta.env.BASE_URL || "/") + URDF_OPS_PAGE_PARAMS.logoAssetPath;
 
   return (
-    <aside className={cn(URDF_OPS_PAGE_CLASS_NAMES.sidebar, collapsed ? "w-16" : "w-64")}>
+    <aside className={cn(URDF_OPS_PAGE_CLASS_NAMES.sidebar, collapsed ? "w-14 sm:w-16" : "w-14 sm:w-64")}>
       <div className={cn(URDF_OPS_PAGE_CLASS_NAMES.sidebarHeader, collapsed && "flex-col gap-2 px-2")}>
         <div className="flex min-w-0 items-center gap-2">
           <Button asChild variant="ghost" size="sm" className={cn(URDF_OPS_PAGE_CLASS_NAMES.backButton, collapsed && "w-full gap-1 px-1")}>
             <Link to="/" title="URDF Ops" aria-label="URDF Ops home">
               <ArrowLeft className="h-4 w-4" />
-              <img src={logoUrl} alt="" className="h-5 w-auto object-contain" />
+              <img src={logoUrl} alt="" className="hidden h-5 w-auto object-contain sm:block" />
             </Link>
           </Button>
           {!collapsed && <h1 className={URDF_OPS_PAGE_CLASS_NAMES.title}>UrdfOps</h1>}
