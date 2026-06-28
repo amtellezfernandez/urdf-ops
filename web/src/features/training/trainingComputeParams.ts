@@ -19,6 +19,7 @@ export const TRAINING_COMPUTE_PARAMS = {
   cloudUnavailableBadge: "Disabled",
   localReadyBadge: "Available",
   remoteReadyBadge: "BYOC",
+  providerReadyBadge: "Ready",
   localRuntimeReviewMessage: "Local runtime is checked before launch.",
   selectedComputeLabel: "Selected Compute",
   pollStatusIntervalMs: 2000,
@@ -28,7 +29,7 @@ export const TRAINING_COMPUTE_BACKEND_NAMES: Record<TrainingComputeBackendId, st
   local: "Local GPU",
   ssh: "Remote Docker machine",
   modal: "Modal",
-  runpod: "RunPod",
+  runpod: "RunPod SSH pod",
   macrodata: "Macrodata Cloud",
   aws: "AWS",
 };
@@ -62,13 +63,11 @@ export const TRAINING_COMPUTE_BACKENDS: readonly TrainingComputeBackendOption[] 
   },
   {
     id: "runpod",
-    selectableType: "runpod",
+    selectableType: "ssh",
     name: TRAINING_COMPUTE_BACKEND_NAMES.runpod,
-    description:
-      "Cloud runner is held closed until execution, logs, artifacts, and cancellation are wired.",
-    enabled: false,
-    productionReady: false,
-    reason: TRAINING_COMPUTE_PARAMS.cloudDisabledMessage,
+    description: "Paste a RunPod SSH command and train directly inside the running pod.",
+    enabled: true,
+    productionReady: true,
   },
   {
     id: "macrodata",

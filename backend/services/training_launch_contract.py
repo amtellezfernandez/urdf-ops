@@ -220,6 +220,9 @@ def build_training_launch_contract(
                 "docker_image": request.compute.docker_image,
                 "docker_args": request.compute.docker_args,
                 "ssh_options": request.compute.ssh_options,
+                "ssh_run_mode": request.compute.ssh_run_mode,
+                "remote_project_dir": request.compute.remote_project_dir,
+                "remote_python": request.compute.remote_python,
                 "use_gpu": request.compute.device == "cuda",
             }
         )

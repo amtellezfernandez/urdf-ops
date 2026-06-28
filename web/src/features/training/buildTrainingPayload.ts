@@ -84,6 +84,9 @@ export function buildTrainingPayload({
       docker_image: computeConfig.dockerImage || "urdf-ops:training",
       docker_args: computeConfig.dockerArgs,
       ssh_options: computeConfig.sshOptions,
+      ssh_run_mode: computeConfig.sshRunMode || "docker",
+      remote_project_dir: computeConfig.remoteProjectDir || "/workspace/urdf-ops",
+      remote_python: computeConfig.remotePython || "python3",
     },
   };
 }

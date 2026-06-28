@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -270,7 +271,7 @@ def test_training_compute_validation_requires_ssh_target() -> None:
         }
     )
 
-    assert validate_training_compute_backend(request.compute) == "Remote Docker training requires an SSH host and user."
+    assert validate_training_compute_backend(request.compute) == "Remote training requires an SSH host and user."
 
 
 def test_training_preflight_blocks_disabled_cloud_backend() -> None:
@@ -303,6 +304,54 @@ def test_training_preflight_reports_missing_ssh_target_without_network() -> None
     assert result.ready is False
     assert result.compute_backend == "ssh"
     assert result.checks[0].name == "ssh_config"
+
+
+def test_training_preflight_direct_ssh_uses_python_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[str] = []
+
+    def fake_ssh_preflight(
+        request: TrainingStartRequest,
+        command: str,
+        timeout: int = 30,
+    ) -> subprocess.CompletedProcess[str]:
+        del request, timeout
+        commands.append(command)
+        if "df -Pk" in command:
+            return subprocess.CompletedProcess(["ssh"], 0, "104857600 209715200\n", "")
+        if "torch.cuda.is_available" in command:
+            return subprocess.CompletedProcess(["ssh"], 0, "1\n", "")
+        return subprocess.CompletedProcess(["ssh"], 0, "/workspace/.venv/bin/python\n", "")
+
+    monkeypatch.setattr(training_service, "_run_ssh_preflight", fake_ssh_preflight)
+    request = TrainingStartRequest.model_validate(
+        {
+            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "model": {"architecture": ModelArchitecture.ACT.value},
+            "compute": {
+                "type": "ssh",
+                "sshRunMode": "direct",
+                "sshHost": "ssh.runpod.io",
+                "sshUser": "pod-user",
+                "remoteOutputDir": "/workspace/robotops-outputs",
+                "remoteProjectDir": "/workspace/urdf-ops",
+                "remotePython": "/workspace/.venv/bin/python",
+                "device": "cuda",
+            },
+        }
+    )
+
+    result = asyncio.run(preflight_training(request))
+
+    assert result.ready is True
+    assert {check.name for check in result.checks} >= {
+        "ssh",
+        "remote_python",
+        "remote_storage",
+        "remote_gpu",
+        "dataset",
+    }
+    assert all("docker " not in command for command in commands)
+    assert any("backend/scripts/train_policy.py" in command for command in commands)
 
 
 def test_training_launch_contract_maps_ssh_compute_config() -> None:
@@ -338,6 +387,43 @@ def test_training_launch_contract_maps_ssh_compute_config() -> None:
     assert contract.compute_config["output_dir"] == "/scratch/robotops"
     assert contract.compute_config["docker_image"] == "urdf-ops:training"
     assert contract.compute_config["docker_args"] == "--shm-size 8g"
+    assert contract.compute_config["ssh_run_mode"] == "docker"
+    assert contract.compute_config["use_gpu"] is True
+
+
+def test_training_launch_contract_maps_direct_ssh_compute_config() -> None:
+    request = TrainingStartRequest.model_validate(
+        {
+            "dataset": {"repoId": TEST_DATASET_REPO_ID},
+            "model": {"architecture": ModelArchitecture.ACT.value},
+            "compute": {
+                "type": "ssh",
+                "sshRunMode": "direct",
+                "sshHost": "ssh.runpod.io",
+                "sshUser": "pod-user",
+                "sshKeyPath": "~/.ssh/runpod_ed25519",
+                "remoteOutputDir": "/workspace/robotops-outputs",
+                "remoteProjectDir": "/workspace/urdf-ops",
+                "remotePython": "/workspace/.venv/bin/python",
+                "device": "cuda",
+            },
+        }
+    )
+
+    contract = build_training_launch_contract(
+        request,
+        job_id=TEST_JOB_ID,
+        lerobot_python_path=Path("/tmp/python"),
+    )
+
+    assert contract.compute_config["type"] == "ssh"
+    assert contract.compute_config["host"] == "ssh.runpod.io"
+    assert contract.compute_config["user"] == "pod-user"
+    assert contract.compute_config["key_path"] == "~/.ssh/runpod_ed25519"
+    assert contract.compute_config["output_dir"] == "/workspace/robotops-outputs"
+    assert contract.compute_config["ssh_run_mode"] == "direct"
+    assert contract.compute_config["remote_project_dir"] == "/workspace/urdf-ops"
+    assert contract.compute_config["remote_python"] == "/workspace/.venv/bin/python"
     assert contract.compute_config["use_gpu"] is True
 
 

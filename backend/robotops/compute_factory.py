@@ -25,7 +25,7 @@ from backend.robotops.compute.local_compute import LocalCompute
 from backend.robotops.compute.macrodata_compute import MacrodataCompute
 from backend.robotops.compute.modal_compute import ModalCompute
 from backend.robotops.compute.runpod_compute import RunPodCompute
-from backend.robotops.compute.ssh_compute import SSHDockerCompute
+from backend.robotops.compute.ssh_compute import SSHDirectCompute, SSHDockerCompute
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,20 @@ class ComputeConfig(BaseModel):
     use_spot: bool = Field(
         default=True,
         description="Use spot instances for cost savings (RunPod)",
+    )
+
+    # SSH-specific
+    ssh_run_mode: str = Field(
+        default="docker",
+        description="SSH execution mode: docker or direct",
+    )
+    remote_project_dir: Optional[str] = Field(
+        default=None,
+        description="Remote project checkout for direct SSH execution",
+    )
+    remote_python: Optional[str] = Field(
+        default=None,
+        description="Remote Python executable for direct SSH execution",
     )
 
     # Common
@@ -217,11 +231,15 @@ def get_compute(
             "docker_image": "docker_image",
             "docker_args": "docker_args",
             "ssh_options": "ssh_options",
+            "remote_project_dir": "remote_project_dir",
+            "remote_python": "remote_python",
         }
         for config_field, kwarg_field in ssh_field_map.items():
             value = getattr(config, config_field, None)
             if value:
                 kwargs[kwarg_field] = value
+        if getattr(config, "ssh_run_mode", "docker") == "direct":
+            compute_cls = SSHDirectCompute
 
     elif compute_type == "modal":
         if config.api_key:

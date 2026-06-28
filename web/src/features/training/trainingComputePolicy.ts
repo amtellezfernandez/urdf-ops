@@ -1,12 +1,12 @@
 import { TRAINING_COMPUTE_PARAMS } from "./trainingComputeParams";
 import type { ComputeConfig } from "./types";
 
-const hasRemoteDockerConfig = (computeConfig: ComputeConfig): boolean =>
+const hasRemoteSshConfig = (computeConfig: ComputeConfig): boolean =>
   Boolean(computeConfig.sshHost?.trim() && computeConfig.sshUser?.trim());
 
 export const canUseConfiguredComputeBackend = (computeConfig: ComputeConfig): boolean =>
   computeConfig.type === "local" ||
-  (computeConfig.type === "ssh" && hasRemoteDockerConfig(computeConfig));
+  (computeConfig.type === "ssh" && hasRemoteSshConfig(computeConfig));
 
 export const getConfiguredComputeBackendBlockReason = (
   computeConfig: ComputeConfig,
@@ -15,7 +15,7 @@ export const getConfiguredComputeBackendBlockReason = (
     return null;
   }
   if (computeConfig.type === "ssh") {
-    return "Remote Docker training requires an SSH host and user.";
+    return "Remote training requires an SSH host and user.";
   }
   return TRAINING_COMPUTE_PARAMS.cloudDisabledMessage;
 };

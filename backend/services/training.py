@@ -613,7 +613,7 @@ def list_training_compute_backends() -> TrainingComputeBackendsResponse:
 def validate_training_compute_backend(compute: ComputeConfig) -> Optional[str]:
     compute_type = _get_enum_value(compute.type)
     if compute_type == "ssh" and (not compute.ssh_host or not compute.ssh_user):
-        return "Remote Docker training requires an SSH host and user."
+        return "Remote training requires an SSH host and user."
     if _is_training_compute_backend_enabled(compute_type):
         return None
     return TRAINING_CLOUD_COMPUTE_DISABLED_MESSAGE
@@ -683,6 +683,104 @@ def _run_ssh_preflight(
     )
 
 
+def _append_remote_storage_preflight(
+    request: TrainingStartRequest,
+    checks: list[TrainingPreflightCheck],
+) -> None:
+    remote_output_dir = request.compute.remote_output_dir
+    quoted_output = shlex.quote(remote_output_dir)
+    try:
+        result = _run_ssh_preflight(
+            request,
+            f"mkdir -p {quoted_output} && df -Pk {quoted_output} | awk 'NR==2 {{print $4\" \"$2}}'",
+            timeout=20,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            free_kb, total_kb = [int(value) for value in result.stdout.strip().split()[:2]]
+            free_gb = round(free_kb / (1024**2), 2)
+            total_gb = round(total_kb / (1024**2), 2)
+            status = "pass" if free_gb >= 20 else "warn" if free_gb >= 5 else "fail"
+            checks.append(
+                _preflight_check(
+                    "remote_storage",
+                    "Remote artifact storage",
+                    status,
+                    f"{free_gb} GB free at {remote_output_dir}.",
+                    {"free_gb": free_gb, "total_gb": total_gb, "path": remote_output_dir},
+                )
+            )
+        else:
+            checks.append(
+                _preflight_check(
+                    "remote_storage",
+                    "Remote artifact storage",
+                    "fail",
+                    result.stderr.strip() or "Could not inspect remote disk.",
+                )
+            )
+    except Exception as exc:
+        checks.append(
+            _preflight_check(
+                "remote_storage",
+                "Remote artifact storage",
+                "fail",
+                f"Remote storage check failed: {exc}",
+            )
+        )
+
+
+def _append_ssh_dataset_preflight(
+    request: TrainingStartRequest,
+    checks: list[TrainingPreflightCheck],
+) -> None:
+    dataset_source = _get_enum_value(request.dataset.source)
+    if dataset_source == "local":
+        local_path = request.dataset.local_path or ""
+        try:
+            result = _run_ssh_preflight(request, f"test -e {shlex.quote(local_path)}", timeout=15)
+            checks.append(
+                _preflight_check(
+                    "dataset",
+                    "Dataset",
+                    "pass" if result.returncode == 0 else "fail",
+                    "Local dataset path exists on the remote machine."
+                    if result.returncode == 0
+                    else "Local dataset path does not exist on the remote machine.",
+                    {"local_path": local_path},
+                )
+            )
+        except Exception as exc:
+            checks.append(_preflight_check("dataset", "Dataset", "fail", f"Remote dataset check failed: {exc}"))
+    elif request.dataset.repo_id:
+        checks.append(
+            _preflight_check(
+                "dataset",
+                "Dataset",
+                "pass",
+                f"Remote trainer will download Hugging Face dataset: {request.dataset.repo_id}",
+            )
+        )
+    else:
+        checks.append(_preflight_check("dataset", "Dataset", "fail", "Hugging Face dataset source requires a repo ID."))
+
+
+def _append_ssh_tracker_preflight(
+    request: TrainingStartRequest,
+    checks: list[TrainingPreflightCheck],
+) -> None:
+    tracker_type = _get_enum_value(request.tracker.type)
+    checks.append(
+        _preflight_check(
+            "tracker",
+            "Experiment tracker",
+            "warn" if tracker_type in {"mlflow", "wandb"} else "pass",
+            "Ensure tracker credentials are available to the remote runner."
+            if tracker_type in {"mlflow", "wandb"}
+            else "Tracker disabled; metrics and artifacts remain local to URDF Ops.",
+        )
+    )
+
+
 def _preflight_ssh_training(request: TrainingStartRequest) -> TrainingPreflightResponse:
     device = request.compute.device
     checks: list[TrainingPreflightCheck] = []
@@ -726,6 +824,85 @@ def _preflight_ssh_training(request: TrainingStartRequest) -> TrainingPreflightR
     except Exception as exc:
         checks.append(_preflight_check("ssh", "SSH access", "fail", f"SSH check failed: {exc}"))
 
+    if request.compute.ssh_run_mode == "direct":
+        remote_project_dir = request.compute.remote_project_dir
+        remote_python = request.compute.remote_python
+        quoted_project = shlex.quote(remote_project_dir)
+        quoted_python = shlex.quote(remote_python)
+        trainer_path = shlex.quote(f"{remote_project_dir}/backend/scripts/train_policy.py")
+
+        try:
+            result = _run_ssh_preflight(
+                request,
+                f"test -f {trainer_path} && cd {quoted_project} && {quoted_python} -c 'import sys; print(sys.executable)'",
+                timeout=30,
+            )
+            checks.append(
+                _preflight_check(
+                    "remote_python",
+                    "Remote Python runner",
+                    "pass" if result.returncode == 0 else "fail",
+                    f"Remote trainer checkout and Python are available: {result.stdout.strip()}"
+                    if result.returncode == 0
+                    else result.stderr.strip()
+                    or f"Missing URDF Ops checkout or Python runner at {remote_project_dir}.",
+                    {"project_dir": remote_project_dir, "python": remote_python},
+                )
+            )
+        except Exception as exc:
+            checks.append(
+                _preflight_check(
+                    "remote_python",
+                    "Remote Python runner",
+                    "fail",
+                    f"Remote Python check failed: {exc}",
+                    {"project_dir": remote_project_dir, "python": remote_python},
+                )
+            )
+
+        _append_remote_storage_preflight(request, checks)
+
+        if device == "cuda":
+            gpu_command = (
+                f"cd {quoted_project} && env PYTHONPATH={quoted_project} "
+                f"{quoted_python} -c 'import torch; print(int(torch.cuda.is_available()))'"
+            )
+            try:
+                result = _run_ssh_preflight(request, gpu_command, timeout=60)
+                gpu_ready = result.returncode == 0 and result.stdout.strip().splitlines()[-1:] == ["1"]
+                checks.append(
+                    _preflight_check(
+                        "remote_gpu",
+                        "Remote GPU",
+                        "pass" if gpu_ready else "fail",
+                        "CUDA is visible to the remote Python runner."
+                        if gpu_ready
+                        else result.stderr.strip() or result.stdout.strip() or "CUDA is not visible to the remote Python runner.",
+                    )
+                )
+            except Exception as exc:
+                checks.append(_preflight_check("remote_gpu", "Remote GPU", "fail", f"GPU check failed: {exc}"))
+        else:
+            checks.append(_preflight_check("remote_gpu", "Remote GPU", "warn", f"Remote training will use device '{device}'."))
+
+        _append_ssh_dataset_preflight(request, checks)
+        _append_ssh_tracker_preflight(request, checks)
+
+        has_failures = any(check.status == "fail" for check in checks)
+        return TrainingPreflightResponse(
+            compute_backend="ssh",
+            device=device,
+            ready=not has_failures,
+            can_train_locally=False,
+            cloud_required=True,
+            recommendation=(
+                "Ready to launch on the remote SSH runner."
+                if not has_failures
+                else "Fix failed remote checks before launching remote training."
+            ),
+            checks=checks,
+        )
+
     try:
         result = _run_ssh_preflight(request, "docker info --format '{{.DockerRootDir}}'", timeout=20)
         checks.append(
@@ -767,46 +944,7 @@ def _preflight_ssh_training(request: TrainingStartRequest) -> TrainingPreflightR
             )
         )
 
-    remote_output_dir = request.compute.remote_output_dir
-    quoted_output = shlex.quote(remote_output_dir)
-    try:
-        result = _run_ssh_preflight(
-            request,
-            f"mkdir -p {quoted_output} && df -Pk {quoted_output} | awk 'NR==2 {{print $4\" \"$2}}'",
-            timeout=20,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            free_kb, total_kb = [int(value) for value in result.stdout.strip().split()[:2]]
-            free_gb = round(free_kb / (1024**2), 2)
-            total_gb = round(total_kb / (1024**2), 2)
-            status = "pass" if free_gb >= 20 else "warn" if free_gb >= 5 else "fail"
-            checks.append(
-                _preflight_check(
-                    "remote_storage",
-                    "Remote artifact storage",
-                    status,
-                    f"{free_gb} GB free at {remote_output_dir}.",
-                    {"free_gb": free_gb, "total_gb": total_gb, "path": remote_output_dir},
-                )
-            )
-        else:
-            checks.append(
-                _preflight_check(
-                    "remote_storage",
-                    "Remote artifact storage",
-                    "fail",
-                    result.stderr.strip() or "Could not inspect remote disk.",
-                )
-            )
-    except Exception as exc:
-        checks.append(
-            _preflight_check(
-                "remote_storage",
-                "Remote artifact storage",
-                "fail",
-                f"Remote storage check failed: {exc}",
-            )
-        )
+    _append_remote_storage_preflight(request, checks)
 
     if device == "cuda":
         gpu_command = (
@@ -831,47 +969,8 @@ def _preflight_ssh_training(request: TrainingStartRequest) -> TrainingPreflightR
     else:
         checks.append(_preflight_check("remote_gpu", "Remote GPU", "warn", f"Remote training will use device '{device}'."))
 
-    dataset_source = _get_enum_value(request.dataset.source)
-    if dataset_source == "local":
-        local_path = request.dataset.local_path or ""
-        try:
-            result = _run_ssh_preflight(request, f"test -e {shlex.quote(local_path)}", timeout=15)
-            checks.append(
-                _preflight_check(
-                    "dataset",
-                    "Dataset",
-                    "pass" if result.returncode == 0 else "fail",
-                    "Local dataset path exists on the remote machine."
-                    if result.returncode == 0
-                    else "Local dataset path does not exist on the remote machine.",
-                    {"local_path": local_path},
-                )
-            )
-        except Exception as exc:
-            checks.append(_preflight_check("dataset", "Dataset", "fail", f"Remote dataset check failed: {exc}"))
-    elif request.dataset.repo_id:
-        checks.append(
-            _preflight_check(
-                "dataset",
-                "Dataset",
-                "pass",
-                f"Remote trainer will download Hugging Face dataset: {request.dataset.repo_id}",
-            )
-        )
-    else:
-        checks.append(_preflight_check("dataset", "Dataset", "fail", "Hugging Face dataset source requires a repo ID."))
-
-    tracker_type = _get_enum_value(request.tracker.type)
-    checks.append(
-        _preflight_check(
-            "tracker",
-            "Experiment tracker",
-            "warn" if tracker_type in {"mlflow", "wandb"} else "pass",
-            "Ensure tracker credentials are available to the remote container."
-            if tracker_type in {"mlflow", "wandb"}
-            else "Tracker disabled; metrics and artifacts remain local to URDF Ops.",
-        )
-    )
+    _append_ssh_dataset_preflight(request, checks)
+    _append_ssh_tracker_preflight(request, checks)
 
     has_failures = any(check.status == "fail" for check in checks)
     return TrainingPreflightResponse(

@@ -23,6 +23,8 @@ from backend.robotops.compute_protocol import (
 SSH_JOB_ID_HEX_LENGTH = 8
 SSH_DEFAULT_OUTPUT_DIR = "/tmp/robotops-outputs"
 SSH_DEFAULT_DOCKER_IMAGE = "urdf-ops:training"
+SSH_DEFAULT_REMOTE_PROJECT_DIR = "/workspace/urdf-ops"
+SSH_DEFAULT_REMOTE_PYTHON = "python3"
 SSH_LOG_TAIL_LINES = 20
 
 
@@ -422,3 +424,202 @@ class SSHDockerCompute:
 
     async def cleanup(self, job_id: str) -> None:
         await self.cancel(job_id)
+
+
+class SSHDirectCompute(SSHDockerCompute):
+    """Run trainer scripts directly on an SSH machine without Docker.
+
+    This mode is intended for SSH-accessible training containers such as RunPod
+    pods, where the pod itself is already the runtime container.
+    """
+
+    name = "ssh"
+
+    def __init__(
+        self,
+        remote_project_dir: str = SSH_DEFAULT_REMOTE_PROJECT_DIR,
+        remote_python: str = SSH_DEFAULT_REMOTE_PYTHON,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.remote_project_dir = remote_project_dir.rstrip("/") or SSH_DEFAULT_REMOTE_PROJECT_DIR
+        self.remote_python = remote_python or SSH_DEFAULT_REMOTE_PYTHON
+
+    async def launch(
+        self,
+        script: str,
+        config: Dict[str, Any],
+        env: Optional[Dict[str, str]] = None,
+    ) -> str:
+        job_id = f"ssh_direct_{uuid.uuid4().hex[:SSH_JOB_ID_HEX_LENGTH]}"
+        remote_job_dir = f"{self.output_dir}/{job_id}"
+        remote_config = f"{remote_job_dir}/config.json"
+        remote_pid = f"{remote_job_dir}/pid"
+        remote_exit_code = f"{remote_job_dir}/exit_code"
+        remote_stdout = f"{remote_job_dir}/stdout.log"
+        remote_stderr = f"{remote_job_dir}/stderr.log"
+
+        mkdir = await self._run_ssh(f"mkdir -p {shlex.quote(remote_job_dir)}", timeout=30)
+        if mkdir.returncode != 0:
+            self._jobs[job_id] = {
+                "state": JobState.FAILED,
+                "error": mkdir.stderr.strip() or "Failed to create remote job directory",
+                "remote_job_dir": remote_job_dir,
+                "pid_file": remote_pid,
+            }
+            return job_id
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tmp:
+            json.dump(config, tmp, indent=2)
+            tmp_path = Path(tmp.name)
+
+        try:
+            copied = await self._scp_to_remote(tmp_path, remote_config, timeout=60)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+        if copied.returncode != 0:
+            self._jobs[job_id] = {
+                "state": JobState.FAILED,
+                "error": copied.stderr.strip() or "Failed to copy config to remote host",
+                "remote_job_dir": remote_job_dir,
+                "pid_file": remote_pid,
+            }
+            return job_id
+
+        env_args = {
+            "URDF_STUDIO_JOB_ID": job_id,
+            "URDF_STUDIO_JOB_DIR": remote_job_dir,
+            "PYTHONPATH": self.remote_project_dir,
+            "PYTHONUNBUFFERED": "1",
+        }
+        if env:
+            env_args.update({key: value for key, value in env.items() if value is not None})
+
+        env_flags = " ".join(
+            f"{shlex.quote(key)}={shlex.quote(str(value))}" for key, value in env_args.items()
+        )
+        trainer_command = (
+            f"cd {shlex.quote(self.remote_project_dir)} && "
+            f"env {env_flags} {shlex.quote(self.remote_python)} "
+            f"backend/scripts/train_policy.py --config {shlex.quote(remote_config)}"
+        )
+        background_command = (
+            f"rm -f {shlex.quote(remote_exit_code)}; "
+            f"({trainer_command} > {shlex.quote(remote_stdout)} "
+            f"2> {shlex.quote(remote_stderr)}; "
+            f"echo $? > {shlex.quote(remote_exit_code)}) "
+            f"> /dev/null 2>&1 & echo $! > {shlex.quote(remote_pid)}"
+        )
+        launched = await self._run_ssh(background_command, timeout=30)
+        state = JobState.RUNNING if launched.returncode == 0 else JobState.FAILED
+        self._jobs[job_id] = {
+            "state": state,
+            "error": launched.stderr.strip() if launched.returncode != 0 else None,
+            "remote_job_dir": remote_job_dir,
+            "pid_file": remote_pid,
+            "exit_code_file": remote_exit_code,
+            "started_at": datetime.now().isoformat(),
+        }
+        return job_id
+
+    async def status(self, job_id: str) -> JobStatus:
+        job = self._ensure_direct_job(job_id)
+
+        if job.get("state") == JobState.FAILED:
+            return JobStatus(
+                job_id=job_id,
+                state=JobState.FAILED,
+                error_message=job.get("error"),
+                compute_backend=self.name,
+            )
+
+        exit_code_file = job["exit_code_file"]
+        exit_result = await self._run_ssh(
+            f"test -f {shlex.quote(exit_code_file)} && cat {shlex.quote(exit_code_file)} || true",
+            timeout=30,
+        )
+        state = JobState.RUNNING
+        error = None
+
+        if exit_result.returncode != 0:
+            state = JobState.FAILED
+            error = exit_result.stderr.strip() or "Failed to inspect remote direct job."
+        elif exit_result.stdout.strip():
+            exit_code_text = exit_result.stdout.strip().splitlines()[-1]
+            exit_code = int(exit_code_text) if exit_code_text.isdigit() else 1
+            if exit_code == 0:
+                state = JobState.COMPLETED
+            else:
+                state = JobState.FAILED
+                error = f"Remote trainer exited with code {exit_code}"
+        else:
+            pid_file = job["pid_file"]
+            running = await self._run_ssh(
+                f"test -f {shlex.quote(pid_file)} && kill -0 $(cat {shlex.quote(pid_file)}) >/dev/null 2>&1",
+                timeout=30,
+            )
+            if running.returncode != 0:
+                state = JobState.FAILED
+                error = "Remote trainer is not running and did not write an exit code."
+
+        logs_tail = await self._read_remote_logs(job["remote_job_dir"], SSH_LOG_TAIL_LINES)
+        progress, metrics = await self._read_remote_progress(f"{job['remote_job_dir']}/progress.json")
+
+        if state in {JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED} and not job.get("finished_at"):
+            job["finished_at"] = datetime.now().isoformat()
+            job["state"] = state
+
+        return JobStatus(
+            job_id=job_id,
+            state=state,
+            progress=progress,
+            metrics=metrics,
+            logs_tail=logs_tail,
+            error_message=error or job.get("error"),
+            started_at=job.get("started_at"),
+            finished_at=job.get("finished_at"),
+            compute_backend=self.name,
+        )
+
+    def _ensure_direct_job(self, job_id: str) -> Dict[str, Any]:
+        if job_id not in self._jobs:
+            remote_job_dir = f"{self.output_dir}/{job_id}"
+            self._jobs[job_id] = {
+                "state": JobState.RUNNING,
+                "remote_job_dir": remote_job_dir,
+                "pid_file": f"{remote_job_dir}/pid",
+                "exit_code_file": f"{remote_job_dir}/exit_code",
+            }
+        return self._jobs[job_id]
+
+    def _ensure_job(self, job_id: str) -> Dict[str, Any]:
+        return self._ensure_direct_job(job_id)
+
+    async def cancel(self, job_id: str) -> bool:
+        job = self._ensure_direct_job(job_id)
+        command = (
+            f"if test -f {shlex.quote(job['pid_file'])}; then "
+            f"pid=$(cat {shlex.quote(job['pid_file'])}); "
+            "pkill -TERM -P \"$pid\" 2>/dev/null || true; "
+            "kill -TERM \"$pid\" 2>/dev/null || true; "
+            f"echo 143 > {shlex.quote(job['exit_code_file'])}; "
+            "fi"
+        )
+        result = await self._run_ssh(command, timeout=30)
+        if result.returncode == 0:
+            job["state"] = JobState.CANCELLED
+            job["finished_at"] = datetime.now().isoformat()
+            return True
+        return False
+
+    async def get_available_instances(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                "name": self.host,
+                "device": "Remote Python runner",
+                "available": True,
+                "provider": "ssh-direct",
+                "cost_per_hour": 0,
+            }
+        ]

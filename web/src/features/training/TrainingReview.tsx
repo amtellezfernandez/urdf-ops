@@ -231,14 +231,26 @@ export function TrainingReview() {
       {/* Compute */}
       <ReviewSection title="Compute" valid={!computeBlockReason}>
         <div className="space-y-1">
-          <div>{TRAINING_COMPUTE_BACKEND_NAMES[computeConfig.type]}</div>
+          <div>
+            {computeConfig.type === "ssh" && computeConfig.sshRunMode === "direct"
+              ? "RunPod SSH pod"
+              : TRAINING_COMPUTE_BACKEND_NAMES[computeConfig.type]}
+          </div>
           <div className="text-xs opacity-75">Device: {computeConfig.device}</div>
           {computeConfig.type === "ssh" ? (
             <div className="text-xs opacity-75">
               SSH: {computeConfig.sshUser || "user"}@{computeConfig.sshHost || "host"}:
               {computeConfig.sshPort || 22}
               <br />
-              Image: <span className="font-mono">{computeConfig.dockerImage || "urdf-ops:training"}</span>
+              {computeConfig.sshRunMode === "direct" ? (
+                <>
+                  Project: <span className="font-mono">{computeConfig.remoteProjectDir || "/workspace/urdf-ops"}</span>
+                </>
+              ) : (
+                <>
+                  Image: <span className="font-mono">{computeConfig.dockerImage || "urdf-ops:training"}</span>
+                </>
+              )}
             </div>
           ) : null}
           {computeBlockReason ? (

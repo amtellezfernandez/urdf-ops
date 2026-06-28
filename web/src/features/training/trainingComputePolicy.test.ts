@@ -30,6 +30,15 @@ const TEST_COMPUTE_CONFIGS = {
     sshHost: "203.0.113.10",
     sshUser: "ubuntu",
   } satisfies ComputeConfig,
+  runpodSsh: {
+    type: "ssh",
+    device: "cuda",
+    useSpot: true,
+    timeoutHours: 4,
+    sshHost: "ssh.runpod.io",
+    sshUser: "pod-user",
+    sshRunMode: "direct",
+  } satisfies ComputeConfig,
   sshMissingHost: {
     type: "ssh",
     device: "cuda",
@@ -43,6 +52,7 @@ describe("training compute policy", () => {
   it("allows local and configured remote Docker production backends", () => {
     expect(canUseConfiguredComputeBackend(TEST_COMPUTE_CONFIGS.local)).toBe(true);
     expect(canUseConfiguredComputeBackend(TEST_COMPUTE_CONFIGS.ssh)).toBe(true);
+    expect(canUseConfiguredComputeBackend(TEST_COMPUTE_CONFIGS.runpodSsh)).toBe(true);
     expect(canUseConfiguredComputeBackend(TEST_COMPUTE_CONFIGS.sshMissingHost)).toBe(false);
     expect(canUseConfiguredComputeBackend(TEST_COMPUTE_CONFIGS.runpod)).toBe(false);
   });

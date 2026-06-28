@@ -8,6 +8,7 @@ import { AlertCircle, CheckCircle2, Cloud, Cpu, Info, Loader2, Lock, Server, Zap
 import { Label } from "@/shared/ui/label";
 import { Input } from "@/shared/ui/input";
 import { Button } from "@/shared/ui/button";
+import { Textarea } from "@/shared/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -25,9 +26,11 @@ import {
   TRAINING_COMPUTE_BACKENDS,
   TRAINING_COMPUTE_PARAMS,
   TRAINING_LOCAL_DEVICES,
+  type TrainingComputeBackendOption,
   type TrainingComputeBackendId,
 } from "./trainingComputeParams";
 import { useTrainingStore } from "./useTrainingStore";
+import { parseSshCommand } from "./sshCommandParser";
 import type {
   ComputeInstanceInfo,
   TrainingComputeBackendCapability,
@@ -60,6 +63,7 @@ export function ComputeSelector() {
   const [preflightResult, setPreflightResult] = useState<TrainingPreflightResponse | null>(null);
   const [preflightError, setPreflightError] = useState<string | null>(null);
   const [isPreflighting, setIsPreflighting] = useState(false);
+  const [sshCommand, setSshCommand] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -95,10 +99,14 @@ export function ComputeSelector() {
     }
   }, [computeConfig.type, setComputeConfig]);
 
+  const selectedSetupId =
+    computeConfig.type === "ssh" && computeConfig.sshRunMode === "direct" ? "runpod" : computeConfig.type;
   const selectedBackend = TRAINING_COMPUTE_BACKENDS.find(
-    (backend) => backend.id === computeConfig.type,
+    (backend) => backend.id === selectedSetupId,
   );
   const canRunPreflight = Boolean(datasetConfig && modelConfig);
+  const isRemoteSsh = computeConfig.type === "ssh";
+  const isDirectSsh = isRemoteSsh && computeConfig.sshRunMode === "direct";
   const localInstanceSummary = useMemo(() => {
     const localInstances = instances.local || [];
     if (localInstances.length === 0) {
@@ -106,6 +114,56 @@ export function ComputeSelector() {
     }
     return `Detected ${localInstances.map((instance) => instance.name).join(", ")}`;
   }, [instances.local]);
+
+  const applyComputeSetup = (backend: TrainingComputeBackendOption) => {
+    if (!backend.selectableType) return;
+
+    if (backend.id === "local") {
+      setComputeConfig({ type: "local", sshRunMode: "docker" });
+      return;
+    }
+
+    if (backend.id === "runpod") {
+      setComputeConfig({
+        type: "ssh",
+        sshRunMode: "direct",
+        sshKeyPath: computeConfig.sshKeyPath || "~/.ssh/runpod_ed25519",
+        remoteOutputDir:
+          !computeConfig.remoteOutputDir || computeConfig.remoteOutputDir === "/tmp/robotops-outputs"
+            ? "/workspace/robotops-outputs"
+            : computeConfig.remoteOutputDir,
+        remoteProjectDir: computeConfig.remoteProjectDir || "/workspace/urdf-ops",
+        remotePython: computeConfig.remotePython || "python3",
+      });
+      return;
+    }
+
+    if (backend.id === "ssh") {
+      setComputeConfig({
+        type: "ssh",
+        sshRunMode: "docker",
+        remoteOutputDir:
+          !computeConfig.remoteOutputDir || computeConfig.remoteOutputDir === "/workspace/robotops-outputs"
+            ? "/tmp/robotops-outputs"
+            : computeConfig.remoteOutputDir,
+        dockerImage: computeConfig.dockerImage || "urdf-ops:training",
+      });
+      return;
+    }
+
+    setComputeConfig({ type: backend.selectableType });
+  };
+
+  const handleSshCommandChange = (value: string) => {
+    setSshCommand(value);
+    const parsed = parseSshCommand(value);
+    if (!parsed) return;
+    setComputeConfig({
+      sshHost: parsed.host,
+      sshUser: parsed.user || computeConfig.sshUser,
+      sshPort: parsed.port || computeConfig.sshPort || 22,
+    });
+  };
 
   const handleRunPreflight = async () => {
     if (!datasetConfig || !modelConfig) {
@@ -141,10 +199,17 @@ export function ComputeSelector() {
         <div className="grid gap-2">
           {TRAINING_COMPUTE_BACKENDS.map((backend) => {
             const Icon = COMPUTE_BACKEND_ICONS[backend.id];
-            const capability = backendCapabilities[backend.id];
+            const capability = backendCapabilities[backend.selectableType || backend.id];
             const enabled = backend.enabled && (capability ? capability.enabled : true);
             const reason = capability?.reason || backend.reason;
-            const isSelected = backend.selectableType === computeConfig.type;
+            const isSelected = backend.id === selectedSetupId;
+            const badge = !enabled
+              ? TRAINING_COMPUTE_PARAMS.cloudUnavailableBadge
+              : backend.id === "local"
+                ? TRAINING_COMPUTE_PARAMS.localReadyBadge
+                : backend.id === "runpod"
+                  ? TRAINING_COMPUTE_PARAMS.providerReadyBadge
+                  : TRAINING_COMPUTE_PARAMS.remoteReadyBadge;
 
             return (
               <button
@@ -153,7 +218,7 @@ export function ComputeSelector() {
                 disabled={!enabled || !backend.selectableType}
                 onClick={() => {
                   if (enabled && backend.selectableType) {
-                    setComputeConfig({ type: backend.selectableType });
+                    applyComputeSetup(backend);
                   }
                 }}
                 className={`w-full rounded-lg border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
@@ -174,11 +239,7 @@ export function ComputeSelector() {
                             : "border-muted-foreground/25 text-muted-foreground"
                         }`}
                       >
-                        {enabled
-                          ? backend.id === "ssh"
-                            ? TRAINING_COMPUTE_PARAMS.remoteReadyBadge
-                            : TRAINING_COMPUTE_PARAMS.localReadyBadge
-                          : TRAINING_COMPUTE_PARAMS.cloudUnavailableBadge}
+                        {badge}
                       </span>
                     </div>
                     <div className="mt-0.5 text-xs text-muted-foreground">{backend.description}</div>
@@ -200,7 +261,7 @@ export function ComputeSelector() {
         <div className="flex items-center gap-2">
           <Info className="h-4 w-4 text-muted-foreground" />
           <Label>
-            {computeConfig.type === "ssh" ? "Remote Docker Configuration" : "Local Configuration"}
+            {isDirectSsh ? "RunPod SSH Pod Configuration" : isRemoteSsh ? "Remote Docker Configuration" : "Local Configuration"}
           </Label>
         </div>
 
@@ -223,8 +284,20 @@ export function ComputeSelector() {
           </Select>
         </div>
 
-        {computeConfig.type === "ssh" ? (
-          <div className="grid grid-cols-2 gap-3">
+        {isRemoteSsh ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1 sm:col-span-2">
+              <Label htmlFor="training-ssh-command" className="text-xs">
+                {isDirectSsh ? "RunPod SSH Command" : "SSH Command"}
+              </Label>
+              <Textarea
+                id="training-ssh-command"
+                value={sshCommand}
+                onChange={(event) => handleSshCommandChange(event.target.value)}
+                placeholder="ssh 4clkaznp2byq60-64411f1f@ssh.runpod.io"
+                className="min-h-16 text-sm"
+              />
+            </div>
             <div className="space-y-1">
               <Label htmlFor="training-ssh-host" className="text-xs">Host / IP</Label>
               <Input
@@ -276,25 +349,53 @@ export function ComputeSelector() {
                 className="h-8 text-sm"
               />
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="training-ssh-image" className="text-xs">Trainer Image</Label>
-              <Input
-                id="training-ssh-image"
-                value={computeConfig.dockerImage || ""}
-                onChange={(event) => setComputeConfig({ dockerImage: event.target.value })}
-                className="h-8 text-sm"
-              />
-            </div>
-            <div className="col-span-2 space-y-1">
-              <Label htmlFor="training-ssh-docker-args" className="text-xs">Docker Args</Label>
-              <Input
-                id="training-ssh-docker-args"
-                value={computeConfig.dockerArgs || ""}
-                onChange={(event) => setComputeConfig({ dockerArgs: event.target.value })}
-                placeholder="--shm-size 8g"
-                className="h-8 text-sm"
-              />
-            </div>
+            {isDirectSsh ? (
+              <>
+                <div className="space-y-1">
+                  <Label htmlFor="training-remote-project" className="text-xs">Remote Project</Label>
+                  <Input
+                    id="training-remote-project"
+                    value={computeConfig.remoteProjectDir || ""}
+                    onChange={(event) => setComputeConfig({ remoteProjectDir: event.target.value })}
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="training-remote-python" className="text-xs">Remote Python</Label>
+                  <Input
+                    id="training-remote-python"
+                    value={computeConfig.remotePython || ""}
+                    onChange={(event) => setComputeConfig({ remotePython: event.target.value })}
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground sm:col-span-2">
+                  Direct mode runs backend/scripts/train_policy.py inside the pod. The URDF Ops checkout and Python environment must already exist there.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <Label htmlFor="training-ssh-image" className="text-xs">Trainer Image</Label>
+                  <Input
+                    id="training-ssh-image"
+                    value={computeConfig.dockerImage || ""}
+                    onChange={(event) => setComputeConfig({ dockerImage: event.target.value })}
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label htmlFor="training-ssh-docker-args" className="text-xs">Docker Args</Label>
+                  <Input
+                    id="training-ssh-docker-args"
+                    value={computeConfig.dockerArgs || ""}
+                    onChange={(event) => setComputeConfig({ dockerArgs: event.target.value })}
+                    placeholder="--shm-size 8g"
+                    className="h-8 text-sm"
+                  />
+                </div>
+              </>
+            )}
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">{localInstanceSummary}</p>
@@ -307,7 +408,10 @@ export function ComputeSelector() {
         </div>
         <div className="mt-1 text-sm font-medium">
           {selectedBackend?.name || "Local GPU"}
-          <span className="ml-2 font-normal text-muted-foreground">{computeConfig.device}</span>
+          <span className="ml-2 font-normal text-muted-foreground">
+            {computeConfig.device}
+            {isDirectSsh ? " direct SSH" : isRemoteSsh ? " Docker" : ""}
+          </span>
         </div>
       </div>
 

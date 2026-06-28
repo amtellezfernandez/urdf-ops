@@ -266,6 +266,18 @@ class ComputeConfig(TrainingApiModel):
     )
     docker_args: Optional[str] = Field(default=None, description="Additional docker run arguments")
     ssh_options: Optional[str] = Field(default=None, description="Additional ssh/scp options")
+    ssh_run_mode: Literal["docker", "direct"] = Field(
+        default="docker",
+        description="Remote SSH execution mode: Docker host or direct Python runner",
+    )
+    remote_project_dir: str = Field(
+        default="/workspace/urdf-ops",
+        description="Remote project checkout used for direct SSH training",
+    )
+    remote_python: str = Field(
+        default="python3",
+        description="Remote Python executable used for direct SSH training",
+    )
 
 
 # ============================================================================

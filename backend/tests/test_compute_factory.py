@@ -11,7 +11,7 @@ from backend.robotops.compute_factory import (
     ComputeConfig,
 )
 from backend.robotops.compute.local_compute import LocalCompute
-from backend.robotops.compute.ssh_compute import SSHDockerCompute
+from backend.robotops.compute.ssh_compute import SSHDirectCompute, SSHDockerCompute
 from backend.robotops.compute_protocol import JobState
 
 
@@ -110,6 +110,29 @@ def test_get_compute_creates_ssh_backend() -> None:
     assert compute.user == "ubuntu"
     assert compute.port == 2222
     assert compute.output_dir == "/scratch/robotops"
+
+
+def test_get_compute_creates_direct_ssh_backend() -> None:
+    _COMPUTE_INSTANCES.clear()
+
+    compute = get_compute(
+        {
+            "type": "ssh",
+            "ssh_run_mode": "direct",
+            "ssh_host": "ssh.runpod.io",
+            "ssh_user": "pod-user",
+            "remote_output_dir": "/workspace/robotops-outputs",
+            "remote_project_dir": "/workspace/urdf-ops",
+            "remote_python": "/workspace/venv/bin/python",
+        }
+    )
+
+    assert isinstance(compute, SSHDirectCompute)
+    assert compute.host == "ssh.runpod.io"
+    assert compute.user == "pod-user"
+    assert compute.output_dir == "/workspace/robotops-outputs"
+    assert compute.remote_project_dir == "/workspace/urdf-ops"
+    assert compute.remote_python == "/workspace/venv/bin/python"
 
 
 def test_ssh_compute_launch_sets_container_pythonpath() -> None:

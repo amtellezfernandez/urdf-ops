@@ -91,6 +91,9 @@ export interface ComputeConfig {
   dockerImage?: string;
   dockerArgs?: string;
   sshOptions?: string;
+  sshRunMode?: "docker" | "direct";
+  remoteProjectDir?: string;
+  remotePython?: string;
 }
 
 // ============================================================================
@@ -324,4 +327,7 @@ export const DEFAULT_COMPUTE_CONFIG: ComputeConfig = {
   sshPort: 22,
   remoteOutputDir: "/tmp/robotops-outputs",
   dockerImage: "urdf-ops:training",
+  sshRunMode: "docker",
+  remoteProjectDir: "/workspace/urdf-ops",
+  remotePython: "python3",
 };
